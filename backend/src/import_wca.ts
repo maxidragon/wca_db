@@ -1,3 +1,5 @@
+import * as dotenv from "dotenv";
+dotenv.config();
 import { exec } from "child_process";
 import fs from "fs";
 import path from "path";
@@ -15,6 +17,18 @@ function runCommand(
   return new Promise((resolve) => {
     exec(cmd, (error, stdout, stderr) => {
       resolve({ error, stdout, stderr });
+    });
+  });
+}
+
+import { spawn } from "child_process";
+
+function runCommandStreaming(cmd: string, args: string[] = []): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, { stdio: "inherit", shell: true });
+    child.on("close", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`${cmd} exited with code ${code}`));
     });
   });
 }
@@ -41,6 +55,66 @@ async function downloadFile(url: string, dest: string): Promise<void> {
   });
 }
 
+async function importDump(
+  dbName: string,
+  dbUser: string,
+  dbPass: string,
+  sqlFilePath: string
+) {
+  console.log("Importing SQL...");
+
+  const child = spawn(
+    "mysql",
+    [`--user=${dbUser}`, `--password=${dbPass}`, dbName],
+    { stdio: ["pipe", "inherit", "inherit"] } // stdin dla dumpa, stdout/stderr na konsolę
+  );
+
+  fs.createReadStream(sqlFilePath).pipe(child.stdin);
+
+  await new Promise<void>((resolve, reject) => {
+    child.on("close", (code) => {
+      if (code === 0) {
+        console.log("Import finished");
+        resolve();
+      } else {
+        reject(new Error(`mysql exited with code ${code}`));
+      }
+    });
+  });
+}
+
+async function storeExportTimestamp(dbName: string, dbUser: string, dbPass: string, exportTimestamp: string) {
+  const sql = `
+    CREATE TABLE IF NOT EXISTS wca_statistics_metadata (
+      field VARCHAR(255),
+      value VARCHAR(255)
+    );
+    DELETE FROM wca_statistics_metadata WHERE field = 'export_timestamp';
+    INSERT INTO wca_statistics_metadata (field, value)
+      VALUES ('export_timestamp', '${exportTimestamp}');
+  `;
+
+  return new Promise<void>((resolve, reject) => {
+    const child = spawn(
+      "mysql",
+      [`--user=${dbUser}`, `--password=${dbPass}`, dbName],
+      { stdio: ["pipe", "inherit", "inherit"] }
+    );
+
+    child.stdin.write(sql);
+    child.stdin.end();
+
+    child.on("close", (code) => {
+      if (code === 0) {
+        console.log("Metadata stored");
+        resolve();
+      } else {
+        reject(new Error(`mysql exited with code ${code}`));
+      }
+    });
+  });
+}
+
 export async function importWcaDatabase() {
   const tmpDir = path.join(__dirname, "..", "tmp");
   if (!fs.existsSync(tmpDir)) {
@@ -63,33 +137,16 @@ export async function importWcaDatabase() {
 
   const mysqlWithCredentials = `mysql --user=${DB_USER} --password=${DB_PASS}`;
   console.log("Recreating database...");
-  await runCommand(
-    `${mysqlWithCredentials} -e "DROP DATABASE IF EXISTS ${DB_NAME}"`
+  await runCommandStreaming(
+    `mysql --user=${DB_USER} --password=${DB_PASS} -e "DROP DATABASE IF EXISTS ${DB_NAME}; CREATE DATABASE ${DB_NAME};"`
   );
-  await runCommand(`${mysqlWithCredentials} -e "CREATE DATABASE ${DB_NAME}"`);
 
-  console.log("Importing SQL...");
-  await runCommand(`${mysqlWithCredentials} ${DB_NAME} < ${sqlFilePath}`);
+  await importDump(DB_NAME, DB_USER, DB_PASS, sqlFilePath);
   console.log("Database import finished");
 
   const exportTimestamp = fs.statSync(sqlFilePath).mtime.toISOString();
-  const storeMetadataSQL = `
-    CREATE TABLE IF NOT EXISTS wca_statistics_metadata (
-      field VARCHAR(255),
-      value VARCHAR(255)
-    );
-    DELETE FROM wca_statistics_metadata WHERE field = 'export_timestamp';
-    INSERT INTO wca_statistics_metadata (field, value) 
-      VALUES ('export_timestamp', '${exportTimestamp}');
-  `;
-  await runCommand(
-    `${mysqlWithCredentials} ${DB_NAME} -e "${storeMetadataSQL.replace(
-      /\n/g,
-      " "
-    )}"`
-  );
-
-  console.log("Metadata stored");
+  await storeExportTimestamp(DB_NAME, DB_USER, DB_PASS, exportTimestamp);
+ 
 }
 
 if (require.main === module) {
