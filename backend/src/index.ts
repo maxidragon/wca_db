@@ -75,6 +75,7 @@ app.post(
       if (paginatedQuery.toUpperCase().startsWith("SELECT")) {
         const offset = (page - 1) * pageSize;
         paginatedQuery = `${paginatedQuery} LIMIT ${pageSize} OFFSET ${offset}`;
+        console.log(`Executing paginated query: ${paginatedQuery}, requested by user ${req.user}`);
         const [data] = await pool.query<RowDataPacket[]>(paginatedQuery);
         rows = data;
 

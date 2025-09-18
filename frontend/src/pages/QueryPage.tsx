@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { backendRequest } from "../utils/wcaAuth";
 
 interface QueryPageProps {
@@ -6,15 +7,21 @@ interface QueryPageProps {
 }
 
 const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
-  const [query, setQuery] = useState<string>("");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [query, setQuery] = useState<string>(searchParams.get("query") || "");
   const [results, setResults] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [page, setPage] = useState<number>(1);
-  const [total, setTotal] = useState<number>(0);
+  const [page, setPage] = useState(1);
   const pageSize = 20;
+  const [total, setTotal] = useState(0);
+
+  useEffect(() => {
+    setSearchParams({ query });
+  }, [query, setSearchParams]);
 
   const handleExecute = async (newPage = 1) => {
-    if (!query.trim()) return;
+    if (!query.trim() || !token) return;
+
     try {
       const res = await backendRequest("api/query", "POST", true, {
         query,
@@ -29,6 +36,7 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
         setResults(data.rows || []);
         setError(null);
         setPage(newPage);
+        setTotal(data.total || 0);
       }
     } catch (err: any) {
       setError(err.message);
@@ -39,8 +47,12 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
   const columns = results.length > 0 ? Object.keys(results[0]) : [];
 
   return (
-    <div className="w-full max-w-6xl mx-auto p-4">
-      <h2 className="text-2xl font-bold mb-4">SQL Query</h2>
+    <div className="max-w-6xl mx-auto p-4">
+      {!token && (
+        <p className="mb-3 text-red-500 font-medium">
+          You must be logged in to execute any queries.
+        </p>
+      )}
       <textarea
         className="w-full p-3 border border-gray-300 rounded mb-3 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
         rows={4}
@@ -48,7 +60,6 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
         onChange={(e) => setQuery(e.target.value)}
         placeholder="Enter SELECT or DESC query..."
       />
-
       <div className="flex gap-2 mb-4">
         <button
           className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-400"
@@ -60,14 +71,14 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
         <button
           className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
           onClick={() => handleExecute(page - 1)}
-          disabled={page <= 1}
+          disabled={page <= 1 || !token}
         >
           Previous
         </button>
         <button
           className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
           onClick={() => handleExecute(page + 1)}
-          disabled={page * pageSize >= total}
+          disabled={page * pageSize >= total || !token}
         >
           Next
         </button>
