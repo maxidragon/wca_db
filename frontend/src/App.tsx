@@ -109,10 +109,6 @@ function App() {
           >
             <FaGithub size={40} />
           </a>
-          <span className="mt-1 md:mt-0 text-center md:text-left">
-            Disclaimer: This tool is for personal use only. Data comes from WCA
-            and is used for educational purposes.
-          </span>
         </div>
       </footer>
     </div>
