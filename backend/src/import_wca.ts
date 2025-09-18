@@ -2,6 +2,7 @@ import * as dotenv from "dotenv";
 dotenv.config();
 import { exec } from "child_process";
 import fs from "fs";
+import readline from "readline";
 import path from "path";
 import https from "https";
 
@@ -54,36 +55,62 @@ async function downloadFile(url: string, dest: string): Promise<void> {
       });
   });
 }
+export async function importDump(sqlFilePath: string) {
+  console.log("Preparing SQL for import...");
 
-async function importDump(
-  dbName: string,
-  dbUser: string,
-  dbPass: string,
-  sqlFilePath: string
-) {
-  console.log("Importing SQL...");
+  const tmpFilePath = path.join(path.dirname(sqlFilePath), "clean_dump.sql");
+  const readStream = fs.createReadStream(sqlFilePath, { encoding: "utf-8" });
+  const writeStream = fs.createWriteStream(tmpFilePath, { encoding: "utf-8" });
 
-  const child = spawn(
-    "mysql",
-    [`--user=${dbUser}`, `--password=${dbPass}`, dbName],
-    { stdio: ["pipe", "inherit", "inherit"] } // stdin dla dumpa, stdout/stderr na konsolę
-  );
-
-  fs.createReadStream(sqlFilePath).pipe(child.stdin);
+  let isFirstLine = true;
+  for await (const chunk of readStream) {
+    const lines = chunk.toString().split(/\r?\n/);
+    for (let line of lines) {
+      if (isFirstLine) {
+        isFirstLine = false;
+        continue;
+      }
+      writeStream.write(line + "\n");
+    }
+  }
+  writeStream.end();
 
   await new Promise<void>((resolve, reject) => {
+    writeStream.on("finish", resolve);
+    writeStream.on("error", reject);
+  });
+
+  console.log("Importing SQL into database...");
+
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(
+      "mariadb",
+      [
+        `--user=${DB_USER}`,
+        `--password=${DB_PASS}`,
+        DB_NAME,
+        "-e",
+        `source ${tmpFilePath}`,
+      ],
+      { stdio: ["inherit", "inherit", "inherit"] }
+    );
+
     child.on("close", (code) => {
       if (code === 0) {
-        console.log("Import finished");
+        console.log("Database import finished successfully.");
         resolve();
       } else {
-        reject(new Error(`mysql exited with code ${code}`));
+        reject(new Error(`mariadb exited with code ${code}`));
       }
     });
   });
 }
-
-async function storeExportTimestamp(dbName: string, dbUser: string, dbPass: string, exportTimestamp: string) {
+async function storeExportTimestamp(
+  dbName: string,
+  dbUser: string,
+  dbPass: string,
+  exportTimestamp: string
+) {
   const sql = `
     CREATE TABLE IF NOT EXISTS wca_statistics_metadata (
       field VARCHAR(255),
@@ -135,18 +162,16 @@ export async function importWcaDatabase() {
   }
   const sqlFilePath = path.join(tmpDir, sqlFile);
 
-  const mysqlWithCredentials = `mysql --user=${DB_USER} --password=${DB_PASS}`;
   console.log("Recreating database...");
   await runCommandStreaming(
     `mysql --user=${DB_USER} --password=${DB_PASS} -e "DROP DATABASE IF EXISTS ${DB_NAME}; CREATE DATABASE ${DB_NAME};"`
   );
 
-  await importDump(DB_NAME, DB_USER, DB_PASS, sqlFilePath);
+  await importDump(sqlFilePath);
   console.log("Database import finished");
 
   const exportTimestamp = fs.statSync(sqlFilePath).mtime.toISOString();
   await storeExportTimestamp(DB_NAME, DB_USER, DB_PASS, exportTimestamp);
- 
 }
 
 if (require.main === module) {
