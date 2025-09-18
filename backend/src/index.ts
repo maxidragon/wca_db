@@ -51,6 +51,23 @@ function validateQuery(q: string): boolean {
   return true;
 }
 
+app.get("/api/metadata", async (req: Request, res: Response) => {
+  try {
+    const [rows] = await pool.query(
+      "SELECT field, value FROM wca_statistics_metadata WHERE field = 'export_timestamp' LIMIT 1"
+    )
+    if (Array.isArray(rows) && rows.length > 0) {
+      console.log(rows[0])
+      res.json({ export_timestamp: (rows[0] as any).value })
+    } else {
+      res.status(404).json({ error: "No export metadata found" })
+    }
+  } catch (err: any) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+
 app.post("/auth/wca/login", loginWithWca);
 
 app.post(

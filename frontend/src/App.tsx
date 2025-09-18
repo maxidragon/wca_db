@@ -3,6 +3,7 @@ import { Routes, Route, useNavigate, useSearchParams } from "react-router-dom";
 import { getToken, getUserInfo, loginWithWca, logout } from "./utils/wcaAuth";
 import QueryPage from "./pages/QueryPage";
 import { FaGithub } from "react-icons/fa";
+import { getMetadata } from "./utils/utils";
 
 const WCA_CLIENT_ID = "CC0A_AtlCDiKhPUqo3Voh1ow-PWfHc_wHnUagPZFjJw";
 const WCA_ORIGIN = "https://www.worldcubeassociation.org";
@@ -13,6 +14,7 @@ function App() {
   const navigate = useNavigate();
   const [userInfo, setUserInfo] = useState<any>(getUserInfo());
   const [token, setToken] = useState<string | null>(getToken());
+  const [exportDate, setExportDate] = useState<string | null>(null);
 
   const handleLoginResponse = useCallback(
     (status: number, data?: any) => {
@@ -57,11 +59,21 @@ function App() {
     setToken(null);
   };
 
+  useEffect(() => {
+    const fetchExportDate = async () => {
+      const metadata = await getMetadata();
+      if (metadata && metadata.export_timestamp) {
+        setExportDate(metadata.export_timestamp);
+      }
+    };
+    fetchExportDate();
+  }, []);
+
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col">
       <header className="bg-white shadow">
         <div className="max-w-6xl mx-auto px-4 py-4 flex justify-between items-center">
-          <h1 className="text-2xl font-bold text-blue-600">WCA DB</h1>
+          <h1 className="text-2xl font-bold text-blue-600">WCA DB Query</h1>
           {userInfo ? (
             <div className="flex items-center gap-3">
               {userInfo.avatarUrl && (
@@ -76,7 +88,7 @@ function App() {
               </span>
               <button
                 onClick={handleLogout}
-                className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600"
+                className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 cursor-pointer"
               >
                 Logout
               </button>
@@ -84,7 +96,7 @@ function App() {
           ) : (
             <button
               onClick={handleWcaLogin}
-              className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+              className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 cursor-pointer"
             >
               Login with WCA
             </button>
@@ -93,7 +105,7 @@ function App() {
       </header>
 
       <main className="flex-grow w-full max-w-7xl mx-auto p-4">
-      <Routes>
+        <Routes>
           <Route path="/" element={<QueryPage token={token} />} />
           <Route path="/auth/login" element={<p>Logging in...</p>} />
         </Routes>
@@ -109,6 +121,9 @@ function App() {
           >
             <FaGithub size={40} />
           </a>
+          <span className="text-center">
+            Results until {new Date(exportDate || "").toLocaleString() || "N/A"}
+          </span>
         </div>
       </footer>
     </div>

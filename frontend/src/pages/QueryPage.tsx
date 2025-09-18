@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
-import { backendRequest } from "../utils/wcaAuth";
+import { backendRequest } from "../utils/request";
 
 interface QueryPageProps {
   token: string | null;
@@ -58,29 +58,41 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
         rows={4}
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        placeholder="Enter SELECT or DESC query..."
+        placeholder="Enter query..."
       />
       <div className="flex gap-2 mb-4">
         <button
-          className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-400"
+          className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-400 disabled:cursor-not-allowed cursor-pointer"
           onClick={() => handleExecute(1)}
           disabled={!token}
         >
           Execute
         </button>
         <button
-          className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
+          className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           onClick={() => handleExecute(page - 1)}
           disabled={page <= 1 || !token}
         >
           Previous
         </button>
         <button
-          className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
+          className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           onClick={() => handleExecute(page + 1)}
           disabled={page * pageSize >= total || !token}
         >
           Next
+        </button>
+        <button 
+          className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 cursor-pointer"
+          onClick={() => {
+            setQuery("");
+            setResults([]);
+            setError(null);
+            setPage(1);
+            setTotal(0);
+          }}
+        >
+          Clear
         </button>
       </div>
       {error && <p className="text-red-500 mb-3">{error}</p>}
