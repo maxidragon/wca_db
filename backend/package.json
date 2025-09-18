@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "nodemon",
     "start": "node dist/index.js",
-    "build": "tsc"
+    "build": "tsc",
+    "import": "ts-node src/import_wca.ts"
   },
   "dependencies": {
     "@types/jsonwebtoken": "^9.0.10",
