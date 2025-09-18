@@ -27,6 +27,12 @@ jobs:
     - name: Build project
       run: npm run build
       working-directory: ./backend
+    - name: Install frontend dependencies
+      run: npm install
+      working-directory: ./frontend
+    - name: Build frontend
+      run: npm run build
+      working-directory: ./frontend
     - name: Restart service
       run: pm2 restart wca-db-backend -s || pm2 start dist/index.js --name wca-db-backend -s
       working-directory: ./backend
