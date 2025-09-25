@@ -44,11 +44,16 @@ initDb();
 function validateQuery(q: string): boolean {
   if (!q || typeof q !== "string") return false;
   const cleaned = q.trim().toUpperCase();
+
   const firstWord = cleaned.split(/\s+/)[0];
+  if (["DESC", "DESCRIBE"].includes(firstWord)) return true;
+  if (firstWord === "SELECT") return true;
 
-  if (!["SELECT", "DESC", "DESCRIBE"].includes(firstWord)) return false;
+  if (firstWord === "WITH") {
+    return /^\s*WITH[\s\S]+SELECT/i.test(cleaned);
+  }
 
-  return true;
+  return false;
 }
 
 app.get("/api/metadata", async (req: Request, res: Response) => {
@@ -69,44 +74,62 @@ app.get("/api/metadata", async (req: Request, res: Response) => {
 
 
 app.post("/auth/wca/login", loginWithWca);
-
 app.post(
   "/api/query",
   ensureAuthenticated,
   async (req: Request, res: Response) => {
     const q = (req.body && req.body.query) as string;
-    const page = parseInt(req.body.page) || 1;
-    const pageSize = parseInt(req.body.pageSize) || 50;
+    let page = parseInt(req.body.page) || 1;
+    let pageSize = parseInt(req.body.pageSize) || 50;
 
     if (!validateQuery(q)) {
       return res
         .status(400)
-        .json({ error: "Only SELECT and DESC/DESCRIBE statements allowed" });
+        .json({ error: "Only SELECT (with optional WITH) and DESC/DESCRIBE statements allowed" });
     }
 
     try {
-      let paginatedQuery = q.trim().replace(/;$/, "");
+      let baseQuery = q.trim().replace(/;$/, "");
       let rows: RowDataPacket[] = [];
       let total = 0;
 
-      if (paginatedQuery.toUpperCase().startsWith("SELECT")) {
-        const offset = (page - 1) * pageSize;
-        paginatedQuery = `${paginatedQuery} LIMIT ${pageSize} OFFSET ${offset}`;
-        const userData = req.user as { wcaUserId: number; username: string };
-        console.log(
-          `Executing paginated query: ${paginatedQuery}, requested by user ${userData.wcaUserId} (${userData.username})`
-        );
-        const [data] = await pool.query<RowDataPacket[]>(paginatedQuery);
-        rows = data;
+      if (baseQuery.toUpperCase().startsWith("SELECT") || baseQuery.toUpperCase().startsWith("WITH")) {
+        const limitMatch = baseQuery.match(/LIMIT\s+(\d+)/i);
+        if (limitMatch) {
+          const limitValue = parseInt(limitMatch[1], 10);
+          if (limitValue > 100) {
+            return res.status(400).json({ error: "LIMIT cannot exceed 100" });
+          }
+          const userData = req.user as { wcaUserId: number; username: string };
+          console.log(
+            `Executing user-provided query with LIMIT: ${baseQuery}, requested by user ${userData.wcaUserId} (${userData.username})`
+          );
+          const [data] = await pool.query<RowDataPacket[]>(baseQuery);
+          rows = data;
+          total = rows.length;
+          page = 1;
+          pageSize = total;
+        } else {
+          const offset = (page - 1) * pageSize;
+          const paginatedQuery = `${baseQuery} LIMIT ${pageSize} OFFSET ${offset}`;
+          const userData = req.user as { wcaUserId: number; username: string };
+          console.log(
+            `Executing paginated query: ${paginatedQuery}, requested by user ${userData.wcaUserId} (${userData.username})`
+          );
+          const [data] = await pool.query<RowDataPacket[]>(paginatedQuery);
+          rows = data;
 
-        const [[countRow]] = await pool.query<RowDataPacket[]>(
-          `SELECT COUNT(*) as count FROM (${q.trim().replace(/;$/, "")}) as sub`
-        );
-        total = Number(countRow.count);
+          const [[countRow]] = await pool.query<RowDataPacket[]>(
+            `SELECT COUNT(*) as count FROM (${baseQuery}) as sub`
+          );
+          total = Number(countRow.count);
+        }
       } else {
-        const [data] = await pool.query<RowDataPacket[]>(paginatedQuery);
+        const [data] = await pool.query<RowDataPacket[]>(baseQuery);
         rows = data;
         total = rows.length;
+        page = 1;
+        pageSize = total;
       }
 
       res.json({ rows, page, pageSize, total });

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { backendRequest } from "../utils/request";
 
@@ -12,8 +12,15 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
   const [results, setResults] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
-  const pageSize = 20;
+  const [pageSize, setPageSize] = useState(20);
   const [total, setTotal] = useState(0);
+
+  const params = useMemo(() => {
+    const matches = query.match(/:\w+/g) || [];
+    return Array.from(new Set(matches));
+  }, [query]);
+
+  const [paramValues, setParamValues] = useState<Record<string, string>>({});
 
   useEffect(() => {
     setSearchParams({ query });
@@ -22,9 +29,15 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
   const handleExecute = async (newPage = 1) => {
     if (!query.trim() || !token) return;
 
+    let finalQuery = query;
+    params.forEach((p) => {
+      const value = paramValues[p] ?? "";
+      finalQuery = finalQuery.replace(new RegExp(p, "g"), value);
+    });
+
     try {
       const res = await backendRequest("api/query", "POST", true, {
-        query,
+        query: finalQuery,
         page: newPage,
         pageSize,
       });
@@ -36,6 +49,7 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
         setResults(data.rows || []);
         setError(null);
         setPage(newPage);
+        setPageSize(data.pageSize || pageSize);
         setTotal(data.total || 0);
       }
     } catch (err: any) {
@@ -60,6 +74,26 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
         onChange={(e) => setQuery(e.target.value)}
         placeholder="Enter query..."
       />
+
+      {params.length > 0 && (
+        <div className="mb-3 space-y-2">
+          {params.map((p) => (
+            <div key={p} className="flex items-center gap-2">
+              <label className="w-24 font-medium">{p}</label>
+              <input
+                type="text"
+                value={paramValues[p] || ""}
+                onChange={(e) =>
+                  setParamValues((prev) => ({ ...prev, [p]: e.target.value }))
+                }
+                className="flex-1 p-2 border rounded"
+                placeholder={`Enter value for ${p}`}
+              />
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="flex gap-2 mb-4">
         <button
           className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-400 disabled:cursor-not-allowed cursor-pointer"
@@ -82,7 +116,7 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
         >
           Next
         </button>
-        <button 
+        <button
           className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 cursor-pointer"
           onClick={() => {
             setQuery("");
@@ -90,13 +124,15 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
             setError(null);
             setPage(1);
             setTotal(0);
+            setParamValues({});
           }}
         >
           Clear
         </button>
       </div>
+
       {error && <p className="text-red-500 mb-3">{error}</p>}
-      {results.length > 0 && (
+      {results.length > 0 ? (
         <div className="overflow-x-auto border rounded shadow">
           <table className="min-w-full border-collapse">
             <thead className="bg-gray-100">
@@ -124,6 +160,8 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
             Page {page} of {Math.ceil(total / pageSize)}, total records: {total}
           </p>
         </div>
+      ) : (
+        !error && <p className="text-gray-600">No results to display.</p>
       )}
     </div>
   );
