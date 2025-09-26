@@ -14,6 +14,7 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [total, setTotal] = useState(0);
+  const [isLoading, setIsLoading] = useState(false);
 
   const params = useMemo(() => {
     const matches = query.match(/:\w+/g) || [];
@@ -36,6 +37,7 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
     });
 
     try {
+      setIsLoading(true);
       const res = await backendRequest("api/query", "POST", true, {
         query: finalQuery,
         page: newPage,
@@ -55,6 +57,8 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
     } catch (err: any) {
       setError(err.message);
       setResults([]);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -98,21 +102,21 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
         <button
           className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-400 disabled:cursor-not-allowed cursor-pointer"
           onClick={() => handleExecute(1)}
-          disabled={!token}
+          disabled={!token || isLoading}
         >
-          Execute
+          {isLoading ? "Loading..." : "Execute"}
         </button>
         <button
           className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           onClick={() => handleExecute(page - 1)}
-          disabled={page <= 1 || !token}
+          disabled={page <= 1 || !token || isLoading}
         >
           Previous
         </button>
         <button
           className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           onClick={() => handleExecute(page + 1)}
-          disabled={page * pageSize >= total || !token}
+          disabled={page * pageSize >= total || !token || isLoading}
         >
           Next
         </button>
@@ -126,13 +130,20 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
             setTotal(0);
             setParamValues({});
           }}
+          disabled={isLoading}
         >
           Clear
         </button>
       </div>
 
-      {error && <p className="text-red-500 mb-3">{error}</p>}
-      {results.length > 0 ? (
+      {isLoading && (
+        <div className="flex justify-center my-4">
+          <div className="w-6 h-6 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+        </div>
+      )}
+
+      {error && !isLoading && <p className="text-red-500 mb-3">{error}</p>}
+      {!isLoading && results.length > 0 ? (
         <div className="overflow-x-auto border rounded shadow">
           <table className="min-w-full border-collapse">
             <thead className="bg-gray-100">
@@ -161,7 +172,8 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
           </p>
         </div>
       ) : (
-        !error && <p className="text-gray-600">No results to display.</p>
+        !error &&
+        !isLoading && <p className="text-gray-600">No results to display.</p>
       )}
     </div>
   );
