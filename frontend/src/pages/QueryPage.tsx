@@ -1,12 +1,16 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { backendRequest } from "../utils/request";
+import { Editor, useMonaco } from "@monaco-editor/react";
+import { getSchema } from "../utils/utils";
+import toast from "react-hot-toast";
 
 interface QueryPageProps {
   token: string | null;
 }
 
 const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
+  const monaco = useMonaco();
   const [searchParams, setSearchParams] = useSearchParams();
   const [query, setQuery] = useState<string>(searchParams.get("query") || "");
   const [results, setResults] = useState<any[]>([]);
@@ -26,6 +30,150 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
   useEffect(() => {
     setSearchParams({ query });
   }, [query, setSearchParams]);
+
+  useEffect(() => {
+    if (!monaco) return;
+    const addSuggestions = async () => {
+      const response = await getSchema();
+      if (response.status === 200) {
+        const schemaData = response.data;
+
+        monaco.languages.registerCompletionItemProvider("sql", {
+          triggerCharacters: [" ", ".", ","],
+          provideCompletionItems: (model, position) => {
+            const textUntilPosition = model.getValueInRange({
+              startLineNumber: 1,
+              startColumn: 1,
+              endLineNumber: position.lineNumber,
+              endColumn: position.column,
+            });
+
+            const suggestions: any[] = [];
+            const keywords = [
+              "SELECT",
+              "FROM",
+              "WHERE",
+              "JOIN",
+              "LEFT JOIN",
+              "RIGHT JOIN",
+              "INNER JOIN",
+              "GROUP BY",
+              "ORDER BY",
+              "LIMIT",
+              "AS",
+              "ON",
+              "AND",
+              "OR",
+              "NOT",
+              "DISTINCT",
+            ];
+            keywords.forEach((kw) =>
+              suggestions.push({
+                label: kw,
+                kind: monaco.languages.CompletionItemKind.Keyword,
+                insertText: kw,
+              })
+            );
+
+            const tableMatches = Array.from(
+              textUntilPosition.matchAll(/(?:FROM|JOIN)\s+(\w+)/gi)
+            );
+            const usedTables = tableMatches.map((m) => m[1]);
+
+            const lastTokens = textUntilPosition.match(/(\w+|\.)+/g) || [];
+            const lastToken = lastTokens[lastTokens.length - 1] || "";
+
+            const tableDotMatch = lastToken.match(/^(\w+)\.$/);
+            if (tableDotMatch && schemaData[tableDotMatch[1]]) {
+              schemaData[tableDotMatch[1]].columns.forEach((col: any) => {
+                suggestions.push({
+                  label: col.name,
+                  kind: monaco.languages.CompletionItemKind.Field,
+                  insertText: col.name,
+                  detail: col.type,
+                });
+              });
+              return { suggestions };
+            }
+
+            const selectContext = /SELECT[\s\S]*$/i.test(textUntilPosition);
+            const lastChar = textUntilPosition.slice(-1);
+            if (
+              selectContext &&
+              (lastChar === " " ||
+                lastChar === "," ||
+                lastToken.toUpperCase() !== "FROM")
+            ) {
+              usedTables.forEach((t) => {
+                if (schemaData[t]) {
+                  schemaData[t].columns.forEach((col: any) => {
+                    suggestions.push({
+                      label: col.name,
+                      kind: monaco.languages.CompletionItemKind.Field,
+                      insertText: col.name,
+                      detail: `${t}.${col.name}`,
+                    });
+                  });
+                }
+              });
+            }
+
+            if (
+              /WHERE\s*$|AND\s*$|ON\s*$|GROUP\s+BY\s*$|ORDER\s+BY\s*$/i.test(
+                textUntilPosition
+              )
+            ) {
+              usedTables.forEach((t) => {
+                if (schemaData[t]) {
+                  schemaData[t].columns.forEach((col: any) => {
+                    suggestions.push({
+                      label: col.name,
+                      kind: monaco.languages.CompletionItemKind.Field,
+                      insertText: col.name,
+                      detail: `${t}.${col.name}`,
+                    });
+                  });
+                }
+              });
+            }
+
+            if (/FROM\s*$|JOIN\s*$/i.test(textUntilPosition)) {
+              Object.keys(schemaData).forEach((table) => {
+                suggestions.push({
+                  label: table,
+                  kind: monaco.languages.CompletionItemKind.Class,
+                  insertText: table,
+                  detail: "table",
+                });
+              });
+            }
+
+            if (
+              /SELECT\s*$/i.test(textUntilPosition) ||
+              lastToken === "," ||
+              selectContext
+            ) {
+              Object.values(schemaData).forEach((table: any) => {
+                table.columns.forEach((col: any) => {
+                  suggestions.push({
+                    label: col.name,
+                    kind: monaco.languages.CompletionItemKind.Field,
+                    insertText: col.name,
+                    detail: `${col.name} (${table.name || "table"})`,
+                  });
+                });
+              });
+            }
+
+            return { suggestions };
+          },
+        });
+      } else {
+        toast.error("Error fetching schema");
+      }
+    };
+    addSuggestions();
+  }, [monaco]);
 
   const handleExecute = async (newPage = 1) => {
     if (!query.trim() || !token) return;
@@ -71,14 +219,18 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
           You must be logged in to execute any queries.
         </p>
       )}
-      <textarea
-        className="w-full p-3 border border-gray-300 rounded mb-3 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-        rows={4}
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        placeholder="Enter query..."
-      />
-
+      <div className="border border-gray-300 rounded mb-3 shadow-sm">
+        <Editor
+          height="200px"
+          defaultLanguage="sql"
+          value={query}
+          onChange={(val) => setQuery(val || "")}
+          options={{
+            minimap: { enabled: false },
+            fontSize: 14,
+          }}
+        />
+      </div>
       {params.length > 0 && (
         <div className="mb-3 space-y-2">
           {params.map((p) => (

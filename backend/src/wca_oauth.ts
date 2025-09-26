@@ -45,7 +45,6 @@ export async function loginWithWca(req: Request, res: Response, _next: NextFunct
     })
 
     const tokenData = (await tokenResponse.json()) as TokenResponse
-    console.log(redirectUri, WCA_CLIENT_ID, WCA_CLIENT_SECRET, tokenData)
     if (!tokenResponse.ok || !tokenData.access_token) {
       return res.status(500).json({ message: "Error logging in with WCA", details: tokenData })
     }

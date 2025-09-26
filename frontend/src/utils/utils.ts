@@ -11,3 +11,11 @@ export const getMetadata = async () => {
   }
   return null;
 };
+
+export const getSchema = async () => {
+  const response = await backendRequest("api/schema", "GET", true);
+  return {
+    status: response.status,
+    data: response.status === 200 ? await response.json() : null,
+  };
+};

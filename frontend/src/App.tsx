@@ -4,6 +4,7 @@ import { getToken, getUserInfo, loginWithWca, logout } from "./utils/wcaAuth";
 import QueryPage from "./pages/QueryPage";
 import { FaGithub } from "react-icons/fa";
 import { getMetadata } from "./utils/utils";
+import toast from "react-hot-toast";
 
 const WCA_CLIENT_ID = "CC0A_AtlCDiKhPUqo3Voh1ow-PWfHc_wHnUagPZFjJw";
 const WCA_ORIGIN = "https://www.worldcubeassociation.org";
@@ -22,8 +23,9 @@ function App() {
         setUserInfo(data.userInfo);
         setToken(data.token);
         navigate("/");
+        toast.success("Succesfully logged in");
       } else {
-        alert(data?.message || "Login failed");
+        toast.error(data?.message || "Login failed");
       }
     },
     [navigate]
@@ -57,6 +59,7 @@ function App() {
     logout();
     setUserInfo(null);
     setToken(null);
+    toast.success("Logged out");
   };
 
   useEffect(() => {
@@ -64,6 +67,8 @@ function App() {
       const metadata = await getMetadata();
       if (metadata && metadata.export_timestamp) {
         setExportDate(metadata.export_timestamp);
+      } else {
+        toast.error("Error fetching metadata");
       }
     };
     fetchExportDate();
@@ -110,7 +115,6 @@ function App() {
           <Route path="/auth/login" element={<p>Logging in...</p>} />
         </Routes>
       </main>
-
       <footer className="bg-white shadow-inner">
         <div className="max-w-6xl mx-auto px-4 py-4 flex flex-col items-center justify-center gap-2 text-gray-600 text-sm">
           <a
