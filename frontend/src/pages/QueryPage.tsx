@@ -27,6 +27,20 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
 
   const [paramValues, setParamValues] = useState<Record<string, string>>({});
 
+  const [autocompleteEnabled, setAutocompleteEnabled] = useState<boolean>(
+    () => {
+      const saved = localStorage.getItem("autocompleteEnabled");
+      return saved !== null ? saved === "true" : true;
+    }
+  );
+
+  const toggleAutocomplete = () => {
+    setAutocompleteEnabled((prev) => {
+      localStorage.setItem("autocompleteEnabled", (!prev).toString());
+      return !prev;
+    });
+  };
+
   useEffect(() => {
     setSearchParams({ query });
   }, [query, setSearchParams]);
@@ -169,7 +183,9 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
           },
         });
       } else {
-        toast.error("Error fetching schema");
+        if (response.status !== 401) {
+          toast.error("Error fetching schema");
+        }
       }
     };
     addSuggestions();
@@ -219,17 +235,40 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
           You must be logged in to execute any queries.
         </p>
       )}
-      <div className="border border-gray-300 rounded mb-3 shadow-sm">
-        <Editor
-          height="200px"
-          defaultLanguage="sql"
+      {autocompleteEnabled ? (
+        <div className="border border-gray-300 rounded mb-3 shadow-sm">
+          <Editor
+            height="200px"
+            defaultLanguage="sql"
+            value={query}
+            onChange={(val) => setQuery(val || "")}
+            options={{ minimap: { enabled: false }, fontSize: 14 }}
+          />
+        </div>
+      ) : (
+        <textarea
+          className="w-full p-3 border border-gray-300 rounded mb-3 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+          rows={4}
           value={query}
-          onChange={(val) => setQuery(val || "")}
-          options={{
-            minimap: { enabled: false },
-            fontSize: 14,
-          }}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Enter query..."
         />
+      )}
+      <div className="flex items-center mb-3 gap-3">
+        <span className="font-medium">Autocomplete</span>
+        <button
+          type="button"
+          onClick={toggleAutocomplete}
+          className={`relative inline-flex h-6 w-12 items-center rounded-full transition-colors duration-300 focus:outline-none cursor-pointer ${
+            autocompleteEnabled ? "bg-blue-500" : "bg-gray-300"
+          }`}
+        >
+          <span
+            className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform duration-300 ${
+              autocompleteEnabled ? "translate-x-6" : "translate-x-1"
+            }`}
+          />
+        </button>
       </div>
       {params.length > 0 && (
         <div className="mb-3 space-y-2">
@@ -249,7 +288,6 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
           ))}
         </div>
       )}
-
       <div className="flex gap-2 mb-4">
         <button
           className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-400 disabled:cursor-not-allowed cursor-pointer"
@@ -287,13 +325,11 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
           Clear
         </button>
       </div>
-
       {isLoading && (
         <div className="flex justify-center my-4">
           <div className="w-6 h-6 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
         </div>
       )}
-
       {error && !isLoading && <p className="text-red-500 mb-3">{error}</p>}
       {!isLoading && results.length > 0 ? (
         <div className="overflow-x-auto border rounded shadow">
