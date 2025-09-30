@@ -1,3 +1,1 @@
 # wca_db
-
-siur
