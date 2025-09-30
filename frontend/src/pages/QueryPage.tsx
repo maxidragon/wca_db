@@ -347,8 +347,8 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
               {results.map((row, idx) => (
                 <tr key={idx} className="odd:bg-gray-50">
                   {columns.map((col) => (
-                    <td key={col} className="border px-3 py-2">
-                      {row[col] !== null ? row[col].toString() : ""}
+                    <td key={col} className="border px-3 py-2 whitespace-pre-wrap">
+                      {row[col] !== null ? row[col].toString() : " "}
                     </td>
                   ))}
                 </tr>
