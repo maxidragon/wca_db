@@ -310,13 +310,14 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
             >
               {index == queryNameChangeIndex ? 
                 <input
-                className="field-sizing-content"
+                className="field-sizing-content pr-2"
                 value={savedQueries[index].name}
                 autoFocus={true}
                 onChange={(event) => {renameEditedQuery(event.target.value)}}
                 onBlur={() => {setQueryNameChangeIndex(null)}}></input>
               : 
-              <span 
+              <span
+                className="pr-2"
                 onClick={() => {
                   if (index == currentQueryIndex) return;
                   loadQuery(index);
@@ -324,7 +325,7 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
                 onDoubleClick={() => {setQueryNameChangeIndex(index)}}>
                   {query.name}
                 </span>}
-              <span className="pl-2" onClick={() => {removeQuery(index)}}><VscChromeClose className="min-h-6"/></span>
+              <span onClick={() => {removeQuery(index)}}><VscChromeClose className="min-h-6"/></span>
             </p>
           ))}
       </div>
