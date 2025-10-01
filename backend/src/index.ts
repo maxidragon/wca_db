@@ -149,18 +149,17 @@ app.post(
             `Executing user-provided query with LIMIT: ${baseQuery}, requested by user ${userData.wcaUserId} (${userData.username})`
           );
           const [data, fields] = await pool.query<RowDataPacket[]>(baseQuery);
-          rows = data.map((row: any) => {
-            const newRow: any = {};
-            fields.forEach((field: any, idx: number) => {
-              const colName = field.name;
-              if (newRow[colName] !== undefined) {
-                newRow[`${colName}_${idx}`] = row[colName];
-              } else {
-                newRow[colName] = row[colName];
-              }
-            });
-            return newRow;
-          });
+          rows = data;
+          if (fields) {
+            const fieldNames = fields.map((f) => f.name);
+            const uniqueFieldNames = new Set(fieldNames);
+            if (uniqueFieldNames.size !== fieldNames.length) {
+              return res.status(400).json({
+                error:
+                  "Query cannot have two identical column names. Please use AS to alias them.",
+              });
+            }
+          }
 
           total = rows.length;
           page = 1;
@@ -172,8 +171,20 @@ app.post(
           console.log(
             `Executing paginated query: ${paginatedQuery}, requested by user ${userData.wcaUserId} (${userData.username})`
           );
-          const [data] = await pool.query<RowDataPacket[]>(paginatedQuery);
+          const [data, fields] = await pool.query<RowDataPacket[]>(
+            paginatedQuery
+          );
           rows = data;
+          if (fields) {
+            const fieldNames = fields.map((f) => f.name);
+            const uniqueFieldNames = new Set(fieldNames);
+            if (uniqueFieldNames.size !== fieldNames.length) {
+              return res.status(400).json({
+                error:
+                  "Query cannot have two identical column names. Please use AS to alias them.",
+              });
+            }
+          }
 
           const [[countRow]] = await pool.query<RowDataPacket[]>(
             `SELECT COUNT(*) as count FROM (${baseQuery}) as sub`
@@ -182,20 +193,17 @@ app.post(
         }
       } else {
         const [data, fields] = await pool.query<RowDataPacket[]>(baseQuery);
-
-        rows = data.map((row: any) => {
-          const newRow: any = {};
-          fields.forEach((field: any, idx: number) => {
-            const colName = field.name;
-            if (newRow[colName] !== undefined) {
-              newRow[`${colName}_${idx}`] = row[colName];
-            } else {
-              newRow[colName] = row[colName];
-            }
-          });
-          return newRow;
-        });
-
+        rows = data;
+        if (fields) {
+          const fieldNames = fields.map((f) => f.name);
+          const uniqueFieldNames = new Set(fieldNames);
+          if (uniqueFieldNames.size !== fieldNames.length) {
+            return res.status(400).json({
+              error:
+                "Query cannot have two identical column names. Please use AS to alias them.",
+            });
+          }
+        }
         total = rows.length;
         page = 1;
         pageSize = total;
