@@ -4,6 +4,7 @@ import { backendRequest } from "../utils/request";
 import { Editor, useMonaco } from "@monaco-editor/react";
 import { getSchema } from "../utils/utils";
 import { VscAdd, VscChromeClose } from "react-icons/vsc";
+import { useLongPress } from "@uidotdev/usehooks";
 import toast from "react-hot-toast";
 
 interface QueryPageProps {
@@ -28,6 +29,18 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
   const [savedQueries, setSavedQueries] = useState<SavedQuery[]>(JSON.parse(localStorage.getItem("localQueries") || "[]"));
   const [currentQueryIndex, setCurrentQueryIndex] = useState<number | null>(null);
   const [queryNameChangeIndex, setQueryNameChangeIndex] = useState<number | null>(null);
+
+  const longPressHook = useLongPress(
+    (event) => {
+      const target = event.target as HTMLInputElement;
+      if (target == null) return;
+      const index = parseInt(target.id)
+      setQueryNameChangeIndex(index)
+    },
+    {
+      threshold: 500,
+    }
+  );
 
   const params = useMemo(() => {
     const matches = query.match(/:\w+/g) || [];
@@ -248,8 +261,8 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
     if ((event.ctrlKey || event.metaKey) && event.key === "s") {
       event.preventDefault(); 
       saveQuery();
+    }
   }
-}
 
   const handleExecute = async (newPage = 1) => {
     if (!query.trim() || !token) return;
@@ -314,14 +327,17 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
                 value={savedQueries[index].name}
                 autoFocus={true}
                 onChange={(event) => {renameEditedQuery(event.target.value)}}
-                onBlur={() => {setQueryNameChangeIndex(null)}}></input>
+                onBlur={() => {setQueryNameChangeIndex(null)}}
+                onKeyUp={(event) => {if (event.code == "Enter") setQueryNameChangeIndex(null)}}></input>
               : 
               <span
                 className="pr-2"
+                {...longPressHook}
+                id={index.toString()}
                 onClick={() => {
                   if (index == currentQueryIndex) return;
                   loadQuery(index);
-                }} 
+                }}
                 onDoubleClick={() => {setQueryNameChangeIndex(index)}}>
                   {query.name}
                 </span>}
