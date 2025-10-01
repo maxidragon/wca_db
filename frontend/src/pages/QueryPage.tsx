@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, type SyntheticEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import { backendRequest } from "../utils/request";
 import { Editor, useMonaco } from "@monaco-editor/react";
@@ -7,6 +7,11 @@ import toast from "react-hot-toast";
 
 interface QueryPageProps {
   token: string | null;
+}
+
+interface SavedQuery {
+  name: string;
+  query: string;
 }
 
 const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
@@ -19,6 +24,9 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
   const [pageSize, setPageSize] = useState(20);
   const [total, setTotal] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
+  const [savedQueries, setSavedQueries] = useState<SavedQuery[]>(JSON.parse(localStorage.getItem("localQueries") || "[]"));
+  const [currentQueryIndex, setCurrentQueryIndex] = useState<number | null>(null);
+  const [queryNameChangeIndex, setQueryNameChangeIndex] = useState<number | null>(null);
 
   const params = useMemo(() => {
     const matches = query.match(/:\w+/g) || [];
@@ -191,6 +199,57 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
     addSuggestions();
   }, [monaco]);
 
+  const saveQuery = () => {
+    if (currentQueryIndex == null) return;
+    let finalQuery = query;
+    let queries = savedQueries;
+    queries[currentQueryIndex].query = finalQuery
+    setSavedQueries([...queries]);
+    localStorage.setItem("localQueries", JSON.stringify(queries));
+  }
+
+  const createQuery = () => {
+    let queries = savedQueries;
+    queries.push({name: 'New query', query: ''});
+    setCurrentQueryIndex(queries.length - 1);
+    setQuery("");
+    setSavedQueries([...queries]);
+    localStorage.setItem("localQueries", JSON.stringify(queries));
+  }
+
+  const loadQuery = (id: number) => {
+    let finalQuery = savedQueries[id];
+    setQuery(finalQuery.query);
+    setCurrentQueryIndex(id);
+  }
+  
+  const removeQuery = (id: number) => {
+    let queries = savedQueries;
+    queries.splice(id, 1);
+    if (currentQueryIndex != null && id > currentQueryIndex){
+      setCurrentQueryIndex(currentQueryIndex - 1);
+    } else if(currentQueryIndex != null && id == currentQueryIndex){
+      setCurrentQueryIndex(null)
+      setQuery("");
+    }
+    setSavedQueries([...queries]);
+    localStorage.setItem("localQueries", JSON.stringify(queries));
+  }
+
+  const renameEditedQuery = (newName: string) => {
+    if (queryNameChangeIndex == null) return;
+    let queries = savedQueries;
+    queries[queryNameChangeIndex].name = newName;
+    setSavedQueries([...queries]);
+  }
+
+  function handleKeyDown(event: any){
+    if ((event.ctrlKey || event.metaKey) && event.key === "s") {
+      event.preventDefault(); 
+      saveQuery();
+  }
+}
+
   const handleExecute = async (newPage = 1) => {
     if (!query.trim() || !token) return;
 
@@ -235,8 +294,41 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
           You must be logged in to execute any queries.
         </p>
       )}
+      <div className="flex gap-2 mb-4 overflow-x-auto">
+        <button
+          className="px-4 py-2 bg-green-500 disabled:bg-gray-400 disabled:opacity-50 text-white rounded cursor-pointer"
+          onClick={() => {
+            createQuery()
+          }}>
+          +
+        </button>
+        {savedQueries.map((query, index) => (
+          <p
+            key={index}
+            className={"line-clamp-1 min-w-max max-h-10 px-4 py-2 bg-gray-400 rounded cursor-pointer " + (index == currentQueryIndex ? "opacity-100" : "opacity-50")}
+            >
+              {index == queryNameChangeIndex ? 
+                <input
+                className="field-sizing-content"
+                value={savedQueries[index].name}
+                autoFocus={true}
+                onChange={(event) => {renameEditedQuery(event.target.value)}}
+                onBlur={() => {setQueryNameChangeIndex(null)}}></input>
+              : 
+              <span 
+                onClick={() => {
+                  if (index == currentQueryIndex) return;
+                  loadQuery(index);
+                }} 
+                onDoubleClick={() => {setQueryNameChangeIndex(index)}}>
+                  {query.name}
+                </span>}
+              <span className="pl-2" onClick={() => {removeQuery(index)}}>x</span>
+            </p>
+          ))}
+      </div>
       {autocompleteEnabled ? (
-        <div className="border border-gray-300 rounded mb-3 shadow-sm">
+        <div className="border border-gray-300 rounded mb-3 shadow-sm" onKeyDown={handleKeyDown}>
           <Editor
             height="200px"
             defaultLanguage="sql"
@@ -323,6 +415,12 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
           disabled={isLoading}
         >
           Clear
+        </button>
+        <button 
+          className="px-4 py-2 bg-green-500 text-white rounded cursor-pointer disabled:bg-gray-300 disabled:opacity-50"
+          disabled={currentQueryIndex == null || (currentQueryIndex != null && savedQueries[currentQueryIndex].query == query)}
+          onClick={() => {saveQuery()}}>
+          Save
         </button>
       </div>
       {isLoading && (
