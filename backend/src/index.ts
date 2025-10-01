@@ -60,48 +60,58 @@ app.get("/api/metadata", async (req: Request, res: Response) => {
   try {
     const [rows] = await pool.query(
       "SELECT field, value FROM wca_statistics_metadata WHERE field = 'export_timestamp' LIMIT 1"
-    )
+    );
     if (Array.isArray(rows) && rows.length > 0) {
-      res.json({ export_timestamp: (rows[0] as any).value })
+      res.json({ export_timestamp: (rows[0] as any).value });
     } else {
-      res.status(404).json({ error: "No export metadata found" })
+      res.status(404).json({ error: "No export metadata found" });
     }
-  } catch (err: any) {
-    res.status(500).json({ error: err.message })
-  }
-})
-
-app.get("/api/schema", ensureAuthenticated, async (req: Request, res: Response) => {
-  try {
-    const [tables] = await pool.query<RowDataPacket[]>(
-      `SELECT TABLE_NAME 
-       FROM INFORMATION_SCHEMA.TABLES 
-       WHERE TABLE_SCHEMA = ?`,
-      [process.env.DB_NAME]
-    );
-
-    const [columns] = await pool.query<RowDataPacket[]>(
-      `SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE 
-       FROM INFORMATION_SCHEMA.COLUMNS 
-       WHERE TABLE_SCHEMA = ?`,
-      [process.env.DB_NAME]
-    );
-
-    const schema: Record<string, { columns: { name: string; type: string }[] }> = {};
-
-    (tables as RowDataPacket[]).forEach((t) => {
-      schema[t.TABLE_NAME] = { columns: [] };
-    });
-
-    (columns as RowDataPacket[]).forEach((c) => {
-      schema[c.TABLE_NAME]?.columns.push({ name: c.COLUMN_NAME, type: c.DATA_TYPE });
-    });
-
-    res.json(schema);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
+
+app.get(
+  "/api/schema",
+  ensureAuthenticated,
+  async (req: Request, res: Response) => {
+    try {
+      const [tables] = await pool.query<RowDataPacket[]>(
+        `SELECT TABLE_NAME 
+       FROM INFORMATION_SCHEMA.TABLES 
+       WHERE TABLE_SCHEMA = ?`,
+        [process.env.DB_NAME]
+      );
+
+      const [columns] = await pool.query<RowDataPacket[]>(
+        `SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE 
+       FROM INFORMATION_SCHEMA.COLUMNS 
+       WHERE TABLE_SCHEMA = ?`,
+        [process.env.DB_NAME]
+      );
+
+      const schema: Record<
+        string,
+        { columns: { name: string; type: string }[] }
+      > = {};
+
+      (tables as RowDataPacket[]).forEach((t) => {
+        schema[t.TABLE_NAME] = { columns: [] };
+      });
+
+      (columns as RowDataPacket[]).forEach((c) => {
+        schema[c.TABLE_NAME]?.columns.push({
+          name: c.COLUMN_NAME,
+          type: c.DATA_TYPE,
+        });
+      });
+
+      res.json(schema);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
 
 app.post("/auth/wca/login", loginWithWca);
 app.post(
@@ -113,9 +123,10 @@ app.post(
     let pageSize = parseInt(req.body.pageSize) || 50;
 
     if (!validateQuery(q)) {
-      return res
-        .status(400)
-        .json({ error: "Only SELECT (with optional WITH) and DESC/DESCRIBE statements allowed" });
+      return res.status(400).json({
+        error:
+          "Only SELECT (with optional WITH) and DESC/DESCRIBE statements allowed",
+      });
     }
 
     try {
@@ -123,7 +134,10 @@ app.post(
       let rows: RowDataPacket[] = [];
       let total = 0;
 
-      if (baseQuery.toUpperCase().startsWith("SELECT") || baseQuery.toUpperCase().startsWith("WITH")) {
+      if (
+        baseQuery.toUpperCase().startsWith("SELECT") ||
+        baseQuery.toUpperCase().startsWith("WITH")
+      ) {
         const limitMatch = baseQuery.match(/LIMIT\s+(\d+)/i);
         if (limitMatch) {
           const limitValue = parseInt(limitMatch[1], 10);
@@ -134,8 +148,20 @@ app.post(
           console.log(
             `Executing user-provided query with LIMIT: ${baseQuery}, requested by user ${userData.wcaUserId} (${userData.username})`
           );
-          const [data] = await pool.query<RowDataPacket[]>(baseQuery);
-          rows = data;
+          const [data, fields] = await pool.query<RowDataPacket[]>(baseQuery);
+          rows = data.map((row: any) => {
+            const newRow: any = {};
+            fields.forEach((field: any, idx: number) => {
+              const colName = field.name;
+              if (newRow[colName] !== undefined) {
+                newRow[`${colName}_${idx}`] = row[colName];
+              } else {
+                newRow[colName] = row[colName];
+              }
+            });
+            return newRow;
+          });
+
           total = rows.length;
           page = 1;
           pageSize = total;
@@ -155,8 +181,21 @@ app.post(
           total = Number(countRow.count);
         }
       } else {
-        const [data] = await pool.query<RowDataPacket[]>(baseQuery);
-        rows = data;
+        const [data, fields] = await pool.query<RowDataPacket[]>(baseQuery);
+
+        rows = data.map((row: any) => {
+          const newRow: any = {};
+          fields.forEach((field: any, idx: number) => {
+            const colName = field.name;
+            if (newRow[colName] !== undefined) {
+              newRow[`${colName}_${idx}`] = row[colName];
+            } else {
+              newRow[colName] = row[colName];
+            }
+          });
+          return newRow;
+        });
+
         total = rows.length;
         page = 1;
         pageSize = total;
