@@ -1,24 +1,37 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { useSearchParams } from "react-router-dom";
-import { backendRequest } from "../utils/request";
+import { backendRequest } from "../../utils/request";
 import { Editor, useMonaco } from "@monaco-editor/react";
-import { getSchema } from "../utils/utils";
+import { getSchema } from "../../utils/utils";
+import { VscAdd, VscChromeClose } from "react-icons/vsc";
 import toast from "react-hot-toast";
+import ActionButtons from "./Components/ActionButtons";
 
 interface QueryPageProps {
   token: string | null;
 }
 
+interface SavedQuery {
+  name: string;
+  query: string;
+}
+
 const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
   const monaco = useMonaco();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const [query, setQuery] = useState<string>(searchParams.get("query") || "");
+  const [defaultQueryValue, setDefaultQueryValue] = useState<string>("");
+  const [query, setQuery] = useState<string>(defaultQueryValue);
   const [results, setResults] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [total, setTotal] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
+  const [savedQueries, setSavedQueries] = useState<SavedQuery[]>(
+    JSON.parse(localStorage.getItem("localQueries") || "[]")
+  );
+  const [currentQueryIndex, setCurrentQueryIndex] = useState<number>(-1);
+  const [queryNameChangeIndex, setQueryNameChangeIndex] = useState<
+    number | null
+  >(null);
 
   const params = useMemo(() => {
     const matches = query.match(/:\w+/g) || [];
@@ -26,7 +39,6 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
   }, [query]);
 
   const [paramValues, setParamValues] = useState<Record<string, string>>({});
-
   const [autocompleteEnabled, setAutocompleteEnabled] = useState<boolean>(
     () => {
       const saved = localStorage.getItem("autocompleteEnabled");
@@ -40,10 +52,6 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
       return !prev;
     });
   };
-
-  useEffect(() => {
-    setSearchParams({ query });
-  }, [query, setSearchParams]);
 
   useEffect(() => {
     if (!monaco) return;
@@ -93,11 +101,10 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
               textUntilPosition.matchAll(/(?:FROM|JOIN)\s+(\w+)/gi)
             );
             const usedTables = tableMatches.map((m) => m[1]);
-
             const lastTokens = textUntilPosition.match(/(\w+|\.)+/g) || [];
             const lastToken = lastTokens[lastTokens.length - 1] || "";
-
             const tableDotMatch = lastToken.match(/^(\w+)\.$/);
+
             if (tableDotMatch && schemaData[tableDotMatch[1]]) {
               schemaData[tableDotMatch[1]].columns.forEach((col: any) => {
                 suggestions.push({
@@ -182,18 +189,66 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
             return { suggestions };
           },
         });
-      } else {
-        if (response.status !== 401) {
-          toast.error("Error fetching schema");
-        }
+      } else if (response.status !== 401) {
+        toast.error("Error fetching schema");
       }
     };
     addSuggestions();
   }, [monaco]);
 
+  useEffect(() => {
+    if (currentQueryIndex >= 0) {
+      const queries = [...savedQueries];
+      queries[currentQueryIndex].query = query;
+      setSavedQueries(queries);
+      localStorage.setItem("localQueries", JSON.stringify(queries));
+    } else {
+      setDefaultQueryValue(query);
+    }
+  }, [query]);
+
+  const createQuery = () => {
+    const newQuery = { name: "New query", query: "" };
+    const updated = [...savedQueries, newQuery];
+    setSavedQueries(updated);
+    setCurrentQueryIndex(updated.length - 1);
+    setQuery("");
+    localStorage.setItem("localQueries", JSON.stringify(updated));
+  };
+
+  const loadQuery = (index: number) => {
+    if (index === -1) {
+      setQuery(defaultQueryValue);
+      setCurrentQueryIndex(-1);
+    } else {
+      setQuery(savedQueries[index].query);
+      setCurrentQueryIndex(index);
+    }
+  };
+
+  const removeQuery = (id: number) => {
+    const queries = [...savedQueries];
+    queries.splice(id, 1);
+    setSavedQueries(queries);
+    localStorage.setItem("localQueries", JSON.stringify(queries));
+    if (currentQueryIndex === id) {
+      setQuery(defaultQueryValue);
+      setCurrentQueryIndex(-1);
+    } else if (currentQueryIndex > id) {
+      setCurrentQueryIndex(currentQueryIndex - 1);
+    }
+  };
+
+  const renameEditedQuery = (newName: string) => {
+    if (queryNameChangeIndex == null || queryNameChangeIndex === -1) return;
+    const queries = [...savedQueries];
+    queries[queryNameChangeIndex].name = newName;
+    setSavedQueries(queries);
+    localStorage.setItem("localQueries", JSON.stringify(queries));
+  };
+
   const handleExecute = async (newPage = 1) => {
     if (!query.trim() || !token) return;
-
     let finalQuery = query;
     params.forEach((p) => {
       const value = paramValues[p] ?? "";
@@ -226,6 +281,12 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
     }
   };
 
+  const handleShare = () => {
+    const base = window.location.origin + window.location.pathname;
+    navigator.clipboard.writeText(`${base}?query=${encodeURIComponent(query)}`);
+    toast.success("Query link copied to clipboard");
+  };
+
   const columns = results.length > 0 ? Object.keys(results[0]) : [];
 
   return (
@@ -235,6 +296,61 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
           You must be logged in to execute any queries.
         </p>
       )}
+
+      <div className="flex gap-2 mb-4 overflow-x-auto">
+        <div
+          className={`flex line-clamp-1 min-w-max max-h-10 px-4 py-2 bg-gray-400 rounded cursor-pointer ${
+            currentQueryIndex === -1 ? "opacity-100" : "opacity-50"
+          }`}
+          onClick={() => loadQuery(-1)}
+        >
+          Sandbox
+        </div>
+        <button
+          className="px-4 py-2 bg-green-500 text-white rounded cursor-pointer"
+          onClick={createQuery}
+        >
+          <VscAdd />
+        </button>
+        {savedQueries.map((q, index) => (
+          <div
+            key={index}
+            className={`flex line-clamp-1 min-w-max max-h-10 px-4 py-2 bg-gray-300 rounded cursor-pointer ${
+              currentQueryIndex === index ? "opacity-100" : "opacity-50"
+            }`}
+          >
+            {queryNameChangeIndex === index ? (
+              <input
+                value={q.name}
+                autoFocus
+                onChange={(e) => renameEditedQuery(e.target.value)}
+                onBlur={() => setQueryNameChangeIndex(null)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") setQueryNameChangeIndex(null);
+                }}
+                className="px-1 border rounded"
+              />
+            ) : (
+              <span className="cursor-pointer" onClick={() => loadQuery(index)}>
+                {q.name}
+              </span>
+            )}
+            <button
+              className="ml-2 text-sm text-gray-700"
+              onClick={() => setQueryNameChangeIndex(index)}
+            >
+              ✏️
+            </button>
+            <button
+              className="ml-2 text-sm text-red-500"
+              onClick={() => removeQuery(index)}
+            >
+              <VscChromeClose />
+            </button>
+          </div>
+        ))}
+      </div>
+
       {autocompleteEnabled ? (
         <div className="border border-gray-300 rounded mb-3 shadow-sm">
           <Editor
@@ -254,6 +370,7 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
           placeholder="Enter query..."
         />
       )}
+
       <div className="flex items-center mb-3 gap-3">
         <span className="font-medium">Autocomplete</span>
         <button
@@ -270,6 +387,7 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
           />
         </button>
       </div>
+
       {params.length > 0 && (
         <div className="mb-3 space-y-2">
           {params.map((p) => (
@@ -288,43 +406,23 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
           ))}
         </div>
       )}
-      <div className="flex gap-2 mb-4">
-        <button
-          className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-400 disabled:cursor-not-allowed cursor-pointer"
-          onClick={() => handleExecute(1)}
-          disabled={!token || isLoading}
-        >
-          {isLoading ? "Loading..." : "Execute"}
-        </button>
-        <button
-          className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-          onClick={() => handleExecute(page - 1)}
-          disabled={page <= 1 || !token || isLoading}
-        >
-          Previous
-        </button>
-        <button
-          className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-          onClick={() => handleExecute(page + 1)}
-          disabled={page * pageSize >= total || !token || isLoading}
-        >
-          Next
-        </button>
-        <button
-          className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 cursor-pointer"
-          onClick={() => {
-            setQuery("");
-            setResults([]);
-            setError(null);
-            setPage(1);
-            setTotal(0);
-            setParamValues({});
-          }}
-          disabled={isLoading}
-        >
-          Clear
-        </button>
-      </div>
+
+      <ActionButtons
+        token={token}
+        isLoading={isLoading}
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        setQuery={setQuery}
+        setResults={setResults}
+        setError={setError}
+        setPage={setPage}
+        setTotal={setTotal}
+        setParamValues={setParamValues}
+        handleExecute={handleExecute}
+        handleShare={handleShare}
+      />
+
       {isLoading && (
         <div className="flex justify-center my-4">
           <div className="w-6 h-6 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
@@ -347,8 +445,11 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
               {results.map((row, idx) => (
                 <tr key={idx} className="odd:bg-gray-50">
                   {columns.map((col) => (
-                    <td key={col} className="border px-3 py-2">
-                      {row[col] !== null ? row[col].toString() : ""}
+                    <td
+                      key={col}
+                      className="border px-3 py-2 whitespace-pre-wrap"
+                    >
+                      {row[col] !== null ? row[col].toString() : " "}
                     </td>
                   ))}
                 </tr>

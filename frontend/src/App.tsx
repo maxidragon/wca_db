@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { Routes, Route, useNavigate, useSearchParams } from "react-router-dom";
 import { getToken, getUserInfo, loginWithWca, logout } from "./utils/wcaAuth";
-import QueryPage from "./pages/QueryPage";
+import QueryPage from "./pages/QueryPage/QueryPage";
 import { FaGithub } from "react-icons/fa";
 import { getMetadata } from "./utils/utils";
 import toast from "react-hot-toast";
