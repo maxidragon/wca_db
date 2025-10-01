@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { backendRequest } from "../utils/request";
 import { Editor, useMonaco } from "@monaco-editor/react";
 import { getSchema } from "../utils/utils";
+import { VscAdd, VscChromeClose } from "react-icons/vsc";
 import toast from "react-hot-toast";
 
 interface QueryPageProps {
@@ -226,7 +227,8 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
   const removeQuery = (id: number) => {
     let queries = savedQueries;
     queries.splice(id, 1);
-    if (currentQueryIndex != null && id > currentQueryIndex){
+    if (currentQueryIndex != null && id < currentQueryIndex){
+      console.log('helo')
       setCurrentQueryIndex(currentQueryIndex - 1);
     } else if(currentQueryIndex != null && id == currentQueryIndex){
       setCurrentQueryIndex(null)
@@ -300,12 +302,12 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
           onClick={() => {
             createQuery()
           }}>
-          +
+          <VscAdd className="min-h-6"/>
         </button>
         {savedQueries.map((query, index) => (
           <p
             key={index}
-            className={"line-clamp-1 min-w-max max-h-10 px-4 py-2 bg-gray-400 rounded cursor-pointer " + (index == currentQueryIndex ? "opacity-100" : "opacity-50")}
+            className={"flex line-clamp-1 min-w-max max-h-10 px-4 py-2 bg-gray-400 rounded cursor-pointer " + (index == currentQueryIndex ? "opacity-100" : "opacity-50")}
             >
               {index == queryNameChangeIndex ? 
                 <input
@@ -323,7 +325,7 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
                 onDoubleClick={() => {setQueryNameChangeIndex(index)}}>
                   {query.name}
                 </span>}
-              <span className="pl-2" onClick={() => {removeQuery(index)}}>x</span>
+              <span className="pl-2" onClick={() => {removeQuery(index)}}><VscChromeClose className="min-h-6"/></span>
             </p>
           ))}
       </div>
