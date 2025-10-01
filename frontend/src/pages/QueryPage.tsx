@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, type SyntheticEvent } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { backendRequest } from "../utils/request";
 import { Editor, useMonaco } from "@monaco-editor/react";
@@ -228,7 +228,6 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
     let queries = savedQueries;
     queries.splice(id, 1);
     if (currentQueryIndex != null && id < currentQueryIndex){
-      console.log('helo')
       setCurrentQueryIndex(currentQueryIndex - 1);
     } else if(currentQueryIndex != null && id == currentQueryIndex){
       setCurrentQueryIndex(null)
