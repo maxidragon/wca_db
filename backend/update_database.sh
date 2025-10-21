@@ -47,11 +47,21 @@ INSERT INTO wca_statistics_metadata (field, value)
   VALUES ('export_timestamp', '$EXPORT_TIMESTAMP');
 EOF
 
-mysql --user="$DB_USER" --password="$DB_PASS" -e "
-  DROP DATABASE IF EXISTS $OLD_DB_NAME;
-  RENAME DATABASE $DB_NAME TO $OLD_DB_NAME;
-  RENAME DATABASE $NEW_DB_NAME TO $DB_NAME;
-  DROP DATABASE $OLD_DB_NAME;
-"
+mysql --user="$DB_USER" --password="$DB_PASS" <<EOF
+DROP DATABASE IF EXISTS $OLD_DB_NAME;
+CREATE DATABASE $OLD_DB_NAME;
+EOF
 
-echo "Database updated successfully and swapped atomically."
+TABLES=$(mysql --user="$DB_USER" --password="$DB_PASS" -Nse "SHOW TABLES FROM $DB_NAME")
+for table in $TABLES; do
+  mysql --user="$DB_USER" --password="$DB_PASS" -e "RENAME TABLE $DB_NAME.$table TO $OLD_DB_NAME.$table;"
+done
+
+TABLES_NEW=$(mysql --user="$DB_USER" --password="$DB_PASS" -Nse "SHOW TABLES FROM $NEW_DB_NAME")
+for table in $TABLES_NEW; do
+  mysql --user="$DB_USER" --password="$DB_PASS" -e "RENAME TABLE $NEW_DB_NAME.$table TO $DB_NAME.$table;"
+done
+
+mysql --user="$DB_USER" --password="$DB_PASS" -e "DROP DATABASE $NEW_DB_NAME;"
+
+echo "Database updated successfully and swapped safely."
