@@ -13,7 +13,7 @@ DB_PASS="${DB_PASS:-}"
 DB_NAME="${DB_NAME:-wca}"
 NEW_DB_NAME="${DB_NAME}_new"
 OLD_DB_NAME="${DB_NAME}_old"
-EXPORT_URL="https://assets.worldcubeassociation.org/export/developer/wca-developer-database-dump.zip"
+EXPORT_URL="https://exports.worldcubeassociation.org/developer/wca-developer-database-dump.zip"
 
 TMP_DIR="$SCRIPT_DIR/../tmp"
 ZIP_PATH="$TMP_DIR/wca-dump.zip"
