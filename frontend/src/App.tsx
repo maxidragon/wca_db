@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { Routes, Route, useNavigate, useSearchParams } from "react-router-dom";
 import { getToken, getUserInfo, loginWithWca, logout } from "./utils/wcaAuth";
 import QueryPage from "./pages/QueryPage/QueryPage";
+import Navbar from "./components/Navbar/Navbar";
 import { FaGithub } from "react-icons/fa";
 import { getMetadata } from "./utils/utils";
 import toast from "react-hot-toast";
@@ -76,38 +77,11 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col">
-      <header className="bg-white shadow">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex justify-between items-center">
-          <h1 className="text-2xl font-bold text-blue-600">WCA DB Query</h1>
-          {userInfo ? (
-            <div className="flex items-center gap-3">
-              {userInfo.avatarUrl && (
-                <img
-                  src={userInfo.avatarUrl}
-                  alt="avatar"
-                  className="w-10 h-10 rounded-full border border-gray-300"
-                />
-              )}
-              <span className="font-medium">
-                {userInfo.fullName || userInfo.username}
-              </span>
-              <button
-                onClick={handleLogout}
-                className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 cursor-pointer"
-              >
-                Logout
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={handleWcaLogin}
-              className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 cursor-pointer"
-            >
-              Login with WCA
-            </button>
-          )}
-        </div>
-      </header>
+      <Navbar
+        userInfo={userInfo}
+        onLogin={handleWcaLogin}
+        onLogout={handleLogout}
+      />
 
       <main className="flex-grow w-full max-w-7xl mx-auto p-4">
         <Routes>
@@ -115,8 +89,9 @@ function App() {
           <Route path="/auth/login" element={<p>Logging in...</p>} />
         </Routes>
       </main>
+
       <footer className="bg-white shadow-inner">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex flex-col items-center justify-center gap-2 text-gray-600 text-sm">
+        <div className="max-w-7xl mx-auto px-4 py-4 flex flex-col items-center justify-center gap-2 text-gray-600 text-sm">
           <a
             href="https://github.com/maxidragon/wca_db"
             target="_blank"
