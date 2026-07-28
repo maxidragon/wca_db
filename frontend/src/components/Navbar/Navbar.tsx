@@ -9,6 +9,7 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { label: "Query Tool", to: "/" },
+  { label: "Relations", to: "/relations" },
 ];
 
 interface NavbarProps {

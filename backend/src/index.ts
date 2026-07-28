@@ -6,6 +6,7 @@ import morgan from "morgan";
 import mysql, { RowDataPacket } from "mysql2/promise";
 import session from "express-session";
 import { loginWithWca, ensureAuthenticated } from "./wca_oauth";
+import { getChain, competitionsTogether } from "./relations";
 
 const PORT = process.env.PORT || 3001;
 
@@ -112,6 +113,75 @@ app.get(
     }
   }
 );
+
+const WCA_ID_RE = /^\d{4}[A-Z]{4}\d{2}$/;
+
+app.get("/api/relations", async (req: Request, res: Response) => {
+  const wca_id1 = ((req.query.wca_id1 as string) || "").trim().toUpperCase();
+  const wca_id2 = ((req.query.wca_id2 as string) || "").trim().toUpperCase();
+
+  if (!wca_id1 || !wca_id2) {
+    return res.status(400).json({ error: "Both wca_id1 and wca_id2 are required" });
+  }
+  if (!WCA_ID_RE.test(wca_id1) || !WCA_ID_RE.test(wca_id2)) {
+    return res.status(400).json({ error: "Invalid WCA ID format (expected e.g. 2003ZEMD01)" });
+  }
+
+  try {
+    const [[{ count }]] = await pool.query<RowDataPacket[]>(
+      "SELECT COUNT(*) AS count FROM linkings"
+    );
+    if (Number(count) === 0) {
+      return res.status(503).json({
+        error: "Linkings not yet computed. Run: npm run compute-linkings",
+      });
+    }
+  } catch {
+    return res.status(503).json({
+      error: "Linkings table missing. Run: npm run compute-linkings",
+    });
+  }
+
+  try {
+    const [persons] = await pool.query<RowDataPacket[]>(
+      "SELECT wca_id, name FROM persons WHERE wca_id IN (?, ?) AND sub_id = 1",
+      [wca_id1, wca_id2]
+    );
+    if ((persons as RowDataPacket[]).length !== 2) {
+      return res.status(404).json({ error: "One or both WCA IDs not found" });
+    }
+
+    const chain = await getChain(pool, wca_id1, wca_id2);
+
+    if (chain.length === 0) {
+      return res.json({ chain: [], connections: [] });
+    }
+
+    const placeholders = chain.map(() => "?").join(",");
+    const [chainPersons] = await pool.query<RowDataPacket[]>(
+      `SELECT wca_id, name FROM persons WHERE wca_id IN (${placeholders}) AND sub_id = 1`,
+      chain
+    );
+    const nameMap: Record<string, string> = {};
+    for (const p of chainPersons as RowDataPacket[]) {
+      nameMap[p.wca_id] = p.name;
+    }
+
+    const chainData = chain.map((wca_id) => ({
+      wca_id,
+      name: nameMap[wca_id] || wca_id,
+    }));
+
+    const connections: { id: string; name: string }[][] = [];
+    for (let i = 0; i < chain.length - 1; i++) {
+      connections.push(await competitionsTogether(pool, chain[i], chain[i + 1]));
+    }
+
+    res.json({ chain: chainData, connections });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 app.post("/auth/wca/login", loginWithWca);
 app.post(

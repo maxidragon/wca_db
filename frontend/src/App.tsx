@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { Routes, Route, useNavigate, useSearchParams } from "react-router-dom";
 import { getToken, getUserInfo, loginWithWca, logout } from "./utils/wcaAuth";
 import QueryPage from "./pages/QueryPage/QueryPage";
+import RelationsPage from "./pages/RelationsPage/RelationsPage";
 import Navbar from "./components/Navbar/Navbar";
 import { FaGithub } from "react-icons/fa";
 import { getMetadata } from "./utils/utils";
@@ -86,6 +87,7 @@ function App() {
       <main className="flex-grow w-full max-w-7xl mx-auto p-4">
         <Routes>
           <Route path="/" element={<QueryPage token={token} />} />
+          <Route path="/relations" element={<RelationsPage />} />
           <Route path="/auth/login" element={<p>Logging in...</p>} />
         </Routes>
       </main>
