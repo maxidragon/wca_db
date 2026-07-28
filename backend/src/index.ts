@@ -133,12 +133,12 @@ app.get("/api/relations", async (req: Request, res: Response) => {
     );
     if (Number(count) === 0) {
       return res.status(503).json({
-        error: "Linkings not yet computed. Run: npm run compute-linkings",
+        error: "Linkings not yet computed. Please try again later.",
       });
     }
   } catch {
     return res.status(503).json({
-      error: "Linkings table missing. Run: npm run compute-linkings",
+      error: "Linkings table missing. Please try again later.",
     });
   }
 
