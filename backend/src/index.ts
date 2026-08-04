@@ -183,6 +183,51 @@ app.get("/api/relations", async (req: Request, res: Response) => {
   }
 });
 
+app.get("/api/competitions-together", async (req: Request, res: Response) => {
+  const wca_id1 = ((req.query.wca_id1 as string) || "").trim().toUpperCase();
+  const wca_id2 = ((req.query.wca_id2 as string) || "").trim().toUpperCase();
+
+  if (!wca_id1 || !wca_id2) {
+    return res.status(400).json({ error: "Both wca_id1 and wca_id2 are required" });
+  }
+  if (!WCA_ID_RE.test(wca_id1) || !WCA_ID_RE.test(wca_id2)) {
+    return res.status(400).json({ error: "Invalid WCA ID format (expected e.g. 2003ZEMD01)" });
+  }
+
+  try {
+    const [persons] = await pool.query<RowDataPacket[]>(
+      "SELECT wca_id, name FROM persons WHERE wca_id IN (?, ?) AND sub_id = 1",
+      [wca_id1, wca_id2]
+    );
+    if ((persons as RowDataPacket[]).length < 2) {
+      return res.status(404).json({ error: "One or both WCA IDs not found" });
+    }
+
+    const [competitions] = await pool.query<RowDataPacket[]>(
+      `SELECT DISTINCT r1.competition_id AS id, c.name, c.start_date
+       FROM results r1
+       JOIN results r2 ON r1.competition_id = r2.competition_id
+       JOIN competitions c ON r1.competition_id = c.id
+       WHERE r1.person_id = ? AND r2.person_id = ?
+       ORDER BY c.start_date DESC`,
+      [wca_id1, wca_id2]
+    );
+
+    const personMap: Record<string, string> = {};
+    for (const p of persons as RowDataPacket[]) {
+      personMap[p.wca_id] = p.name;
+    }
+
+    res.json({
+      person1: { wca_id: wca_id1, name: personMap[wca_id1] },
+      person2: { wca_id: wca_id2, name: personMap[wca_id2] },
+      competitions,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post("/auth/wca/login", loginWithWca);
 app.post(
   "/api/query",

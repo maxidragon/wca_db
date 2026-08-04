@@ -10,6 +10,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { label: "Query Tool", to: "/" },
   { label: "Relations", to: "/relations" },
+  { label: "Competitions Together", to: "/competitions-together" },
 ];
 
 interface NavbarProps {
