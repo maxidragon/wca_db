@@ -4,6 +4,7 @@ import { getToken, getUserInfo, loginWithWca, logout } from "./utils/wcaAuth";
 import QueryPage from "./pages/QueryPage/QueryPage";
 import RelationsPage from "./pages/RelationsPage/RelationsPage";
 import CompetitionsTogetherPage from "./pages/CompetitionsTogetherPage/CompetitionsTogetherPage";
+import AchievementsPage from "./pages/AchievementsPage/AchievementsPage";
 import Navbar from "./components/Navbar/Navbar";
 import { FaGithub } from "react-icons/fa";
 import { getMetadata } from "./utils/utils";
@@ -90,6 +91,7 @@ function App() {
           <Route path="/" element={<QueryPage token={token} />} />
           <Route path="/relations" element={<RelationsPage />} />
           <Route path="/competitions-together" element={<CompetitionsTogetherPage />} />
+          <Route path="/achievements" element={<AchievementsPage />} />
           <Route path="/auth/login" element={<p>Logging in...</p>} />
         </Routes>
       </main>

@@ -7,6 +7,7 @@ import mysql, { RowDataPacket } from "mysql2/promise";
 import session from "express-session";
 import { loginWithWca, ensureAuthenticated } from "./wca_oauth";
 import { getChain, competitionsTogether } from "./relations";
+import { getCompetitionAchievements, searchCompetitions } from "./achievements";
 
 const PORT = process.env.PORT || 3001;
 
@@ -223,6 +224,34 @@ app.get("/api/competitions-together", async (req: Request, res: Response) => {
       person2: { wca_id: wca_id2, name: personMap[wca_id2] },
       competitions,
     });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/competitions/search", async (req: Request, res: Response) => {
+  const query = ((req.query.q as string) || "").trim();
+  if (query.length < 2 || query.length > 100) {
+    return res.status(400).json({ error: "Search must be between 2 and 100 characters" });
+  }
+  try {
+    res.json({ competitions: await searchCompetitions(pool, query) });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/achievements", async (req: Request, res: Response) => {
+  const competitionId = ((req.query.competition_id as string) || "").trim();
+  if (!competitionId || competitionId.length > 32) {
+    return res.status(400).json({ error: "A valid competition_id is required" });
+  }
+  try {
+    const achievements = await getCompetitionAchievements(pool, competitionId);
+    if (!achievements) {
+      return res.status(404).json({ error: "Competition not found" });
+    }
+    res.json(achievements);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
