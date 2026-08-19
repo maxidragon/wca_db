@@ -160,9 +160,12 @@ export async function getCompetitionAchievements(
   const [delegateRows] = await pool.query<PersonCountRow[]>(
     `WITH selected_delegates AS (
        SELECT DISTINCT u.wca_id
-       FROM competition_delegates selected_assignment
-       JOIN users u ON u.id = selected_assignment.delegate_id
-       WHERE selected_assignment.competition_id = ? AND u.wca_id IS NOT NULL
+     FROM competition_delegates selected_assignment
+     JOIN users u ON u.id = selected_assignment.delegate_id
+       JOIN competitions selected_comp ON selected_comp.id = selected_assignment.competition_id
+       WHERE selected_assignment.competition_id = ?
+         AND selected_comp.cancelled_at IS NULL
+         AND u.wca_id IS NOT NULL
      )
      SELECT selected.wca_id, p.name,
             COUNT(DISTINCT assignment.competition_id) AS competition_count
@@ -171,7 +174,8 @@ export async function getCompetitionAchievements(
      JOIN users u ON u.wca_id = selected.wca_id
      JOIN competition_delegates assignment ON assignment.delegate_id = u.id
      JOIN competitions delegated_comp ON delegated_comp.id = assignment.competition_id
-     WHERE ${beforeOrAtCondition("delegated_comp")}
+     WHERE delegated_comp.cancelled_at IS NULL
+       AND ${beforeOrAtCondition("delegated_comp")}
      GROUP BY selected.wca_id, p.name`,
     [competition.id, ...sequenceParams]
   );
