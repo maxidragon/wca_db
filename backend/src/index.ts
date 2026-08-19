@@ -117,7 +117,7 @@ app.get(
 
 const WCA_ID_RE = /^\d{4}[A-Z]{4}\d{2}$/;
 
-app.get("/api/relations", async (req: Request, res: Response) => {
+app.get("/api/relations", ensureAuthenticated, async (req: Request, res: Response) => {
   const wca_id1 = ((req.query.wca_id1 as string) || "").trim().toUpperCase();
   const wca_id2 = ((req.query.wca_id2 as string) || "").trim().toUpperCase();
 
@@ -184,7 +184,7 @@ app.get("/api/relations", async (req: Request, res: Response) => {
   }
 });
 
-app.get("/api/competitions-together", async (req: Request, res: Response) => {
+app.get("/api/competitions-together", ensureAuthenticated, async (req: Request, res: Response) => {
   const wca_id1 = ((req.query.wca_id1 as string) || "").trim().toUpperCase();
   const wca_id2 = ((req.query.wca_id2 as string) || "").trim().toUpperCase();
 
@@ -229,7 +229,7 @@ app.get("/api/competitions-together", async (req: Request, res: Response) => {
   }
 });
 
-app.get("/api/competitions/search", async (req: Request, res: Response) => {
+app.get("/api/competitions/search", ensureAuthenticated, async (req: Request, res: Response) => {
   const query = ((req.query.q as string) || "").trim();
   if (query.length < 2 || query.length > 100) {
     return res.status(400).json({ error: "Search must be between 2 and 100 characters" });
@@ -241,7 +241,7 @@ app.get("/api/competitions/search", async (req: Request, res: Response) => {
   }
 });
 
-app.get("/api/achievements", async (req: Request, res: Response) => {
+app.get("/api/achievements", ensureAuthenticated, async (req: Request, res: Response) => {
   const competitionId = ((req.query.competition_id as string) || "").trim();
   if (!competitionId || competitionId.length > 32) {
     return res.status(400).json({ error: "A valid competition_id is required" });

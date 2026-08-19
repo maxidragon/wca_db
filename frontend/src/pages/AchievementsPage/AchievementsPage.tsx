@@ -130,7 +130,7 @@ export default function AchievementsPage() {
       const response = await backendRequest(
         `api/achievements?competition_id=${encodeURIComponent(competitionId)}`,
         "GET",
-        false
+        true
       );
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Could not load achievements");
@@ -165,7 +165,7 @@ export default function AchievementsPage() {
         const response = await backendRequest(
           `api/competitions/search?q=${encodeURIComponent(trimmed)}`,
           "GET",
-          false
+          true
         );
         const data = await response.json();
         if (version === searchVersion.current) {

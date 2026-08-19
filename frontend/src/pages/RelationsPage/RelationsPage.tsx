@@ -47,7 +47,7 @@ const RelationsPage = () => {
       const res = await backendRequest(
         `api/relations?wca_id1=${v1}&wca_id2=${v2}`,
         "GET",
-        false
+        true
       );
       const data = await res.json();
       if (!res.ok) {

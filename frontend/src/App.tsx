@@ -5,25 +5,59 @@ import QueryPage from "./pages/QueryPage/QueryPage";
 import RelationsPage from "./pages/RelationsPage/RelationsPage";
 import CompetitionsTogetherPage from "./pages/CompetitionsTogetherPage/CompetitionsTogetherPage";
 import AchievementsPage from "./pages/AchievementsPage/AchievementsPage";
-import Navbar from "./components/Navbar/Navbar";
+import Navbar, { type NavbarUserInfo } from "./components/Navbar/Navbar";
 import { FaGithub } from "react-icons/fa";
 import { getMetadata } from "./utils/utils";
 import toast from "react-hot-toast";
+import type { ReactNode } from "react";
 
 const WCA_CLIENT_ID = "CC0A_AtlCDiKhPUqo3Voh1ow-PWfHc_wHnUagPZFjJw";
 const WCA_ORIGIN = "https://www.worldcubeassociation.org";
+
+interface LoginResponseData {
+  userInfo?: NavbarUserInfo;
+  token?: string;
+  message?: string;
+}
+
+function ProtectedPage({
+  token,
+  onLogin,
+  children,
+}: {
+  token: string | null;
+  onLogin: () => void;
+  children: ReactNode;
+}) {
+  if (token) return children;
+
+  return (
+    <div className="mx-auto max-w-lg rounded-xl border border-gray-200 bg-white p-8 text-center shadow-sm">
+      <h2 className="text-2xl font-bold text-gray-900">Login required</h2>
+      <p className="mt-2 text-gray-500">
+        Log in with your WCA account to use this tool.
+      </p>
+      <button
+        onClick={onLogin}
+        className="mt-6 rounded-lg bg-blue-500 px-5 py-2.5 font-medium text-white hover:bg-blue-600 cursor-pointer"
+      >
+        Login with WCA
+      </button>
+    </div>
+  );
+}
 
 function App() {
   const [searchParams] = useSearchParams();
   const code = searchParams.get("code");
   const navigate = useNavigate();
-  const [userInfo, setUserInfo] = useState<any>(getUserInfo());
+  const [userInfo, setUserInfo] = useState<NavbarUserInfo | null>(getUserInfo());
   const [token, setToken] = useState<string | null>(getToken());
   const [exportDate, setExportDate] = useState<string | null>(null);
 
   const handleLoginResponse = useCallback(
-    (status: number, data?: any) => {
-      if (status === 200) {
+    (status: number, data?: LoginResponseData) => {
+      if (status === 200 && data?.userInfo && data.token) {
         setUserInfo(data.userInfo);
         setToken(data.token);
         navigate("/");
@@ -88,10 +122,26 @@ function App() {
 
       <main className="flex-grow w-full max-w-7xl mx-auto p-4">
         <Routes>
-          <Route path="/" element={<QueryPage token={token} />} />
-          <Route path="/relations" element={<RelationsPage />} />
-          <Route path="/competitions-together" element={<CompetitionsTogetherPage />} />
-          <Route path="/achievements" element={<AchievementsPage />} />
+          <Route path="/" element={(
+            <ProtectedPage token={token} onLogin={handleWcaLogin}>
+              <QueryPage token={token} />
+            </ProtectedPage>
+          )} />
+          <Route path="/relations" element={(
+            <ProtectedPage token={token} onLogin={handleWcaLogin}>
+              <RelationsPage />
+            </ProtectedPage>
+          )} />
+          <Route path="/competitions-together" element={(
+            <ProtectedPage token={token} onLogin={handleWcaLogin}>
+              <CompetitionsTogetherPage />
+            </ProtectedPage>
+          )} />
+          <Route path="/achievements" element={(
+            <ProtectedPage token={token} onLogin={handleWcaLogin}>
+              <AchievementsPage />
+            </ProtectedPage>
+          )} />
           <Route path="/auth/login" element={<p>Logging in...</p>} />
         </Routes>
       </main>

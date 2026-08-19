@@ -14,8 +14,14 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Achievements", to: "/achievements" },
 ];
 
+export interface NavbarUserInfo {
+  avatarUrl?: string;
+  fullName?: string;
+  username?: string;
+}
+
 interface NavbarProps {
-  userInfo: any;
+  userInfo: NavbarUserInfo | null;
   onLogin: () => void;
   onLogout: () => void;
 }
