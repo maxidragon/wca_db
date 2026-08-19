@@ -62,6 +62,7 @@ function acceptedRegistrationAttendance(today: string, audience: string): string
       AND reg.deleted_at IS NULL
       AND u.wca_id IS NOT NULL
       AND future_comp.end_date >= '${today}'
+      AND future_comp.cancelled_at IS NULL
   `;
 }
 
@@ -365,7 +366,7 @@ export async function getCompetitionAchievements(
     successful_attempt_milestones: successfulAttemptMilestones,
     together_milestones: togetherMilestones,
     methodology: projected
-      ? "Projections use accepted registrations. Attempt projections use first-round attempt slots adjusted by each competitor's historical successful-attempt rate."
+      ? "Competition projections include all accepted, non-cancelled registrations for each competitor up to this competition, deduplicated by competition ID. Attempt projections use first-round attempt slots adjusted by each competitor's historical successful-attempt rate."
       : "Completed achievements use published results and delegate assignments.",
   };
 }
