@@ -2,7 +2,16 @@ import { Pool, RowDataPacket } from "mysql2/promise";
 
 const COMPETITION_MILESTONES = [100, 150, 200, 250, 300, 350, 400];
 const DELEGATE_MILESTONES = [100, 150, 200, 250, 300, 350, 400];
-const ATTEMPT_MILESTONES = [1000, 5000, 10000, 15000, 20000, 25000];
+const ATTEMPT_MILESTONES = [
+  1000,
+  2137,
+  5000,
+  10000,
+  15000,
+  20000,
+  21370,
+  25000,
+];
 const TOGETHER_MILESTONES = [100, 150, 200];
 
 interface CompetitionRow extends RowDataPacket {
