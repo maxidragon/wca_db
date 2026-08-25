@@ -60,25 +60,39 @@ if [ -z "$EXPORT_TIMESTAMP" ]; then
   EXPORT_TIMESTAMP="$(date -u '+%Y-%m-%d %H:%M:%S')"
 fi
 
-ORIG_DOUBLEWRITE="$(db -Nse 'SELECT @@GLOBAL.innodb_doublewrite')"
-ORIG_FLUSH="$(db -Nse 'SELECT @@GLOBAL.innodb_flush_log_at_trx_commit')"
-ORIG_LOG_FILE_SIZE="$(db -Nse 'SELECT @@GLOBAL.innodb_log_file_size')"
-ORIG_BUFFER_POOL_SIZE="$(db -Nse 'SELECT @@GLOBAL.innodb_buffer_pool_size')"
+# Which of these can be changed at runtime depends on the server build — innodb_doublewrite
+# and innodb_log_file_size are read only on older MariaDB. Anything we cannot set is simply
+# skipped: the bulk of the speed-up comes from deferring the index builds, not from these.
+RESTORE_SQL=""
+
+tune() {
+  local name="$1" value="$2" original
+  original="$(db -Nse "SELECT @@GLOBAL.$name" 2>/dev/null)" || return 0
+  if ! db -e "SET GLOBAL $name = $value;" 2>/dev/null; then
+    echo "  $name cannot be set at runtime on this server, leaving it alone"
+    return 0
+  fi
+  case "$original" in
+    '' | *[!0-9]*) original="'$original'" ;;
+  esac
+  RESTORE_SQL="${RESTORE_SQL}SET GLOBAL $name = $original;
+"
+}
 
 restore_settings() {
-  db -e "SET GLOBAL innodb_doublewrite = $ORIG_DOUBLEWRITE;
-         SET GLOBAL innodb_flush_log_at_trx_commit = $ORIG_FLUSH;
-         SET GLOBAL innodb_log_file_size = $ORIG_LOG_FILE_SIZE;
-         SET GLOBAL innodb_buffer_pool_size = $ORIG_BUFFER_POOL_SIZE;" || true
+  local statement
+  while IFS= read -r statement; do
+    [ -n "$statement" ] && db -e "$statement" 2>/dev/null || true
+  done <<< "$RESTORE_SQL"
 }
 trap restore_settings EXIT
 
 step "Tuning InnoDB for the import"
-db -e "SET GLOBAL innodb_doublewrite = 0;
-       SET GLOBAL innodb_flush_log_at_trx_commit = 2;
-       SET GLOBAL innodb_log_file_size = $IMPORT_LOG_FILE_SIZE;"
+tune innodb_doublewrite 0
+tune innodb_flush_log_at_trx_commit 2
+tune innodb_log_file_size "$IMPORT_LOG_FILE_SIZE"
 if [ -n "$IMPORT_BUFFER_POOL_SIZE" ]; then
-  db -e "SET GLOBAL innodb_buffer_pool_size = $IMPORT_BUFFER_POOL_SIZE;"
+  tune innodb_buffer_pool_size "$IMPORT_BUFFER_POOL_SIZE"
 fi
 
 db -e "DROP DATABASE IF EXISTS $NEW_DB_NAME; CREATE DATABASE $NEW_DB_NAME;"
