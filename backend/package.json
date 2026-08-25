@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "nodemon",
     "start": "node dist/index.js",
-    "build": "tsc"
+    "build": "tsc",
+    "compute:best-ever-ranks": "node dist/compute_best_ever_ranks.js"
   },
   "dependencies": {
     "@types/jsonwebtoken": "^9.0.10",
