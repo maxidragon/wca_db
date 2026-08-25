@@ -8,6 +8,7 @@ import session from "express-session";
 import { loginWithWca, ensureAuthenticated } from "./wca_oauth";
 import { getChain, competitionsTogether } from "./relations";
 import { getCompetitionAchievements, searchCompetitions } from "./achievements";
+import { bestEverRanksReady, getBestEverRanks } from "./best_ever_ranks";
 
 const PORT = process.env.PORT || 3001;
 
@@ -224,6 +225,33 @@ app.get("/api/competitions-together", ensureAuthenticated, async (req: Request, 
       person2: { wca_id: wca_id2, name: personMap[wca_id2] },
       competitions,
     });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/best-ever-ranks", ensureAuthenticated, async (req: Request, res: Response) => {
+  const wca_id = ((req.query.wca_id as string) || "").trim().toUpperCase();
+
+  if (!wca_id) {
+    return res.status(400).json({ error: "wca_id is required" });
+  }
+  if (!WCA_ID_RE.test(wca_id)) {
+    return res.status(400).json({ error: "Invalid WCA ID format (expected e.g. 2003ZEMD01)" });
+  }
+
+  if (!(await bestEverRanksReady(pool))) {
+    return res.status(503).json({
+      error: "Best ever ranks not yet computed. Please try again later.",
+    });
+  }
+
+  try {
+    const ranks = await getBestEverRanks(pool, wca_id);
+    if (!ranks) {
+      return res.status(404).json({ error: "WCA ID not found" });
+    }
+    res.json(ranks);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

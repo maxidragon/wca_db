@@ -40,6 +40,9 @@ jobs:
     - name: Compute linkings
       run: ./compute_linkings.sh
       working-directory: ./backend
+    - name: Compute best ever ranks
+      run: ./compute_best_ever_ranks.sh
+      working-directory: ./backend
     - name: Restart service
       run: pm2 restart wca-db-backend -s || pm2 start dist/index.js --name wca-db-backend -s
       working-directory: ./backend
