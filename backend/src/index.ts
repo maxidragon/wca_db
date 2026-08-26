@@ -126,7 +126,7 @@ app.get("/api/relations", ensureAuthenticated, async (req: Request, res: Respons
     return res.status(400).json({ error: "Both wca_id1 and wca_id2 are required" });
   }
   if (!WCA_ID_RE.test(wca_id1) || !WCA_ID_RE.test(wca_id2)) {
-    return res.status(400).json({ error: "Invalid WCA ID format (expected e.g. 2003ZEMD01)" });
+    return res.status(400).json({ error: "Invalid WCA ID format (expected e.g. 2009ZEMD01)" });
   }
 
   try {
@@ -193,7 +193,7 @@ app.get("/api/competitions-together", ensureAuthenticated, async (req: Request, 
     return res.status(400).json({ error: "Both wca_id1 and wca_id2 are required" });
   }
   if (!WCA_ID_RE.test(wca_id1) || !WCA_ID_RE.test(wca_id2)) {
-    return res.status(400).json({ error: "Invalid WCA ID format (expected e.g. 2003ZEMD01)" });
+    return res.status(400).json({ error: "Invalid WCA ID format (expected e.g. 2009ZEMD01)" });
   }
 
   try {
@@ -237,7 +237,7 @@ app.get("/api/best-ever-ranks", ensureAuthenticated, async (req: Request, res: R
     return res.status(400).json({ error: "wca_id is required" });
   }
   if (!WCA_ID_RE.test(wca_id)) {
-    return res.status(400).json({ error: "Invalid WCA ID format (expected e.g. 2003ZEMD01)" });
+    return res.status(400).json({ error: "Invalid WCA ID format (expected e.g. 2009ZEMD01)" });
   }
 
   if (!(await bestEverRanksReady(pool))) {

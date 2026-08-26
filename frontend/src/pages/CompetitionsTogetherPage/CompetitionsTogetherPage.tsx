@@ -46,7 +46,7 @@ const CompetitionsTogetherPage = () => {
     const v2 = id2.trim().toUpperCase();
 
     if (!WCA_ID_RE.test(v1) || !WCA_ID_RE.test(v2)) {
-      setError("Invalid WCA ID format (expected e.g. 2003ZEMD01)");
+      setError("Invalid WCA ID format (expected e.g. 2009ZEMD01)");
       return;
     }
 
@@ -84,14 +84,14 @@ const CompetitionsTogetherPage = () => {
       <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row gap-3 mb-8">
         <input
           className="flex-1 p-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-400 uppercase"
-          placeholder="First WCA ID (e.g. 2003ZEMD01)"
+          placeholder="First WCA ID (e.g. 2012PARK03)"
           value={id1}
           onChange={(e) => setId1(e.target.value.toUpperCase())}
           spellCheck={false}
         />
         <input
           className="flex-1 p-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-400 uppercase"
-          placeholder="Second WCA ID (e.g. 2015GALA01)"
+          placeholder="Second WCA ID (e.g. 2009ZEMD01)"
           value={id2}
           onChange={(e) => setId2(e.target.value.toUpperCase())}
           spellCheck={false}

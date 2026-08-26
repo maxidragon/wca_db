@@ -51,7 +51,7 @@ const BestEverRanksPage = () => {
     const id = wcaId.trim().toUpperCase();
 
     if (!WCA_ID_RE.test(id)) {
-      setError("Invalid WCA ID format (expected e.g. 2003ZEMD01)");
+      setError("Invalid WCA ID format (expected e.g. 2009ZEMD01)");
       return;
     }
 
@@ -86,7 +86,7 @@ const BestEverRanksPage = () => {
       <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row gap-3 mb-8">
         <input
           className="flex-1 p-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-400 uppercase"
-          placeholder="WCA ID (e.g. 2015GALA01)"
+          placeholder="WCA ID (e.g. 2009ZEMD01)"
           value={wcaId}
           onChange={(e) => setWcaId(e.target.value.toUpperCase())}
           spellCheck={false}
