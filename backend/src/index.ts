@@ -59,6 +59,35 @@ function validateQuery(q: string): boolean {
   return false;
 }
 
+// User-written SQL gets a hard execution budget enforced by the database itself: MariaDB kills
+// the statement once it has run this long, which frees the pool connection instead of leaving
+// a stale query behind after the HTTP request has already timed out on the client side.
+const QUERY_TIMEOUT_SECONDS = Number(process.env.QUERY_TIMEOUT_SECONDS) || 60;
+
+// MariaDB: max_statement_time exceeded. Not in mysql2's error table, so match on errno.
+const ER_STATEMENT_TIMEOUT = 1969;
+// Raised when the statement was cancelled some other way, e.g. KILL QUERY by an admin.
+const ER_QUERY_INTERRUPTED = 1317;
+
+function isQueryTimeout(err: any): boolean {
+  return err?.errno === ER_STATEMENT_TIMEOUT || err?.errno === ER_QUERY_INTERRUPTED;
+}
+
+function queryWithTimeLimit(sql: string) {
+  return pool.query<RowDataPacket[]>(
+    `SET STATEMENT max_statement_time=${QUERY_TIMEOUT_SECONDS} FOR ${sql}`
+  );
+}
+
+function hasDuplicateColumnNames(fields: mysql.FieldPacket[] | undefined): boolean {
+  if (!fields) return false;
+  const names = fields.map((f) => f.name);
+  return new Set(names).size !== names.length;
+}
+
+const DUPLICATE_COLUMNS_ERROR =
+  "Query cannot have two identical column names. Please use AS to alias them.";
+
 app.get("/api/metadata", async (req: Request, res: Response) => {
   try {
     const [rows] = await pool.query(
@@ -301,8 +330,11 @@ app.post(
       });
     }
 
+    const userData = req.user as { wcaUserId: number; username: string };
+    const requestedBy = `user ${userData.wcaUserId} (${userData.username})`;
+
     try {
-      let baseQuery = q.trim().replace(/;$/, "");
+      const baseQuery = q.trim().replace(/;$/, "");
       let rows: RowDataPacket[] = [];
       let total = 0;
 
@@ -316,66 +348,44 @@ app.post(
           if (limitValue > 100) {
             return res.status(400).json({ error: "LIMIT cannot exceed 100" });
           }
-          const userData = req.user as { wcaUserId: number; username: string };
           console.log(
-            `Executing user-provided query with LIMIT: ${baseQuery}, requested by user ${userData.wcaUserId} (${userData.username})`
+            `Executing user-provided query with LIMIT: ${baseQuery}, requested by ${requestedBy}`
           );
-          const [data, fields] = await pool.query<RowDataPacket[]>(baseQuery);
-          rows = data;
-          if (fields) {
-            const fieldNames = fields.map((f) => f.name);
-            const uniqueFieldNames = new Set(fieldNames);
-            if (uniqueFieldNames.size !== fieldNames.length) {
-              return res.status(400).json({
-                error:
-                  "Query cannot have two identical column names. Please use AS to alias them.",
-              });
-            }
+          const [data, fields] = await queryWithTimeLimit(baseQuery);
+          if (hasDuplicateColumnNames(fields)) {
+            return res.status(400).json({ error: DUPLICATE_COLUMNS_ERROR });
           }
-
+          rows = data;
           total = rows.length;
           page = 1;
           pageSize = total;
         } else {
           const offset = (page - 1) * pageSize;
           const paginatedQuery = `${baseQuery} LIMIT ${pageSize} OFFSET ${offset}`;
-          const userData = req.user as { wcaUserId: number; username: string };
           console.log(
-            `Executing paginated query: ${paginatedQuery}, requested by user ${userData.wcaUserId} (${userData.username})`
+            `Executing paginated query: ${paginatedQuery}, requested by ${requestedBy}`
           );
-          const [data, fields] = await pool.query<RowDataPacket[]>(
-            paginatedQuery
-          );
-          rows = data;
-          if (fields) {
-            const fieldNames = fields.map((f) => f.name);
-            const uniqueFieldNames = new Set(fieldNames);
-            if (uniqueFieldNames.size !== fieldNames.length) {
-              return res.status(400).json({
-                error:
-                  "Query cannot have two identical column names. Please use AS to alias them.",
-              });
-            }
+          // The page and its total run side by side, each under the same time limit, so a
+          // slow query costs one limit rather than two. Both must finish: a query whose rows
+          // are cheap but whose total cannot be counted in time is still too heavy to serve.
+          const [[data, fields], [[countRow]]] = await Promise.all([
+            queryWithTimeLimit(paginatedQuery),
+            queryWithTimeLimit(
+              `SELECT COUNT(*) as count FROM (${baseQuery}) as sub`
+            ),
+          ]);
+          if (hasDuplicateColumnNames(fields)) {
+            return res.status(400).json({ error: DUPLICATE_COLUMNS_ERROR });
           }
-
-          const [[countRow]] = await pool.query<RowDataPacket[]>(
-            `SELECT COUNT(*) as count FROM (${baseQuery}) as sub`
-          );
+          rows = data;
           total = Number(countRow.count);
         }
       } else {
         const [data, fields] = await pool.query<RowDataPacket[]>(baseQuery);
-        rows = data;
-        if (fields) {
-          const fieldNames = fields.map((f) => f.name);
-          const uniqueFieldNames = new Set(fieldNames);
-          if (uniqueFieldNames.size !== fieldNames.length) {
-            return res.status(400).json({
-              error:
-                "Query cannot have two identical column names. Please use AS to alias them.",
-            });
-          }
+        if (hasDuplicateColumnNames(fields)) {
+          return res.status(400).json({ error: DUPLICATE_COLUMNS_ERROR });
         }
+        rows = data;
         total = rows.length;
         page = 1;
         pageSize = total;
@@ -383,6 +393,13 @@ app.post(
 
       res.json({ rows, page, pageSize, total });
     } catch (err: any) {
+      if (isQueryTimeout(err)) {
+        console.log(`Query cancelled after ${QUERY_TIMEOUT_SECONDS}s, requested by ${requestedBy}`);
+        return res.status(400).json({
+          code: "QUERY_TIMEOUT",
+          error: `Query cancelled: running it (including counting its total rows) took longer than the ${QUERY_TIMEOUT_SECONDS} second limit. Narrow it down (a WHERE clause, fewer joins, a LIMIT) and try again.`,
+        });
+      }
       res.status(400).json({ error: err.message });
     }
   }
