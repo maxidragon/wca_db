@@ -13,6 +13,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Competitions Together", to: "/competitions-together" },
   { label: "Achievements", to: "/achievements" },
   { label: "Best Ever Ranks", to: "/best-ever-ranks" },
+  { label: "Statistics", to: "/statistics" },
 ];
 
 export interface NavbarUserInfo {
@@ -47,7 +48,7 @@ const Navbar = ({ userInfo, onLogin, onLogout }: NavbarProps) => {
             </NavLink>
 
             {/* Desktop nav */}
-            <nav className="hidden md:flex items-center gap-1 ml-4">
+            <nav className="hidden xl:flex items-center gap-1 ml-4">
               {NAV_ITEMS.map((item) => (
                 <NavLink key={item.to} to={item.to} end className={navLinkClass}>
                   {item.label}
@@ -57,7 +58,7 @@ const Navbar = ({ userInfo, onLogin, onLogout }: NavbarProps) => {
           </div>
 
           {/* Desktop auth */}
-          <div className="hidden md:flex items-center gap-3 shrink-0">
+          <div className="hidden xl:flex items-center gap-3 shrink-0">
             {userInfo ? (
               <>
                 {userInfo.avatarUrl && (
@@ -89,9 +90,10 @@ const Navbar = ({ userInfo, onLogin, onLogout }: NavbarProps) => {
 
           {/* Mobile hamburger */}
           <button
-            className="md:hidden p-2 rounded text-gray-600 hover:bg-gray-100 cursor-pointer"
+            className="xl:hidden p-2 rounded text-gray-600 hover:bg-gray-100 cursor-pointer"
             onClick={() => setMenuOpen((o) => !o)}
             aria-label="Toggle menu"
+            aria-expanded={menuOpen}
           >
             {menuOpen ? <HiX size={22} /> : <HiMenu size={22} />}
           </button>
@@ -100,7 +102,7 @@ const Navbar = ({ userInfo, onLogin, onLogout }: NavbarProps) => {
 
       {/* Mobile menu */}
       {menuOpen && (
-        <div className="md:hidden border-t border-gray-100 bg-white px-4 pb-4">
+        <div className="xl:hidden border-t border-gray-100 bg-white px-4 pb-4">
           <nav className="flex flex-col gap-1 pt-2">
             {NAV_ITEMS.map((item) => (
               <NavLink
