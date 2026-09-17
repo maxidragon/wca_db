@@ -6,6 +6,7 @@ import RelationsPage from "./pages/RelationsPage/RelationsPage";
 import CompetitionsTogetherPage from "./pages/CompetitionsTogetherPage/CompetitionsTogetherPage";
 import AchievementsPage from "./pages/AchievementsPage/AchievementsPage";
 import BestEverRanksPage from "./pages/BestEverRanksPage/BestEverRanksPage";
+import StatisticsPage from "./pages/StatisticsPage/StatisticsPage";
 import Navbar, { type NavbarUserInfo } from "./components/Navbar/Navbar";
 import { FaGithub } from "react-icons/fa";
 import { getMetadata } from "./utils/utils";
@@ -146,6 +147,11 @@ function App() {
           <Route path="/best-ever-ranks" element={(
             <ProtectedPage token={token} onLogin={handleWcaLogin}>
               <BestEverRanksPage />
+            </ProtectedPage>
+          )} />
+          <Route path="/statistics" element={(
+            <ProtectedPage token={token} onLogin={handleWcaLogin}>
+              <StatisticsPage />
             </ProtectedPage>
           )} />
           <Route path="/auth/login" element={<p>Logging in...</p>} />

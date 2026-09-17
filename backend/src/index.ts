@@ -9,6 +9,7 @@ import { loginWithWca, ensureAuthenticated } from "./wca_oauth";
 import { getChain, competitionsTogether } from "./relations";
 import { getCompetitionAchievements, searchCompetitions } from "./achievements";
 import { bestEverRanksReady, getBestEverRanks } from "./best_ever_ranks";
+import { createStatisticsService, StatisticsInputError } from "./statistics";
 
 const PORT = process.env.PORT || 3001;
 
@@ -30,19 +31,34 @@ app.use(
   })
 );
 
-let pool: mysql.Pool;
+const pool = mysql.createPool({
+  host: process.env.DB_HOST || "localhost",
+  user: process.env.DB_USER || "root",
+  password: process.env.DB_PASS || "",
+  database: process.env.DB_NAME || "wca",
+  waitForConnections: true,
+  connectionLimit: 10,
+});
+const statisticsService = createStatisticsService(pool);
 
-async function initDb() {
-  pool = mysql.createPool({
-    host: process.env.DB_HOST || "localhost",
-    user: process.env.DB_USER || "root",
-    password: process.env.DB_PASS || "",
-    database: process.env.DB_NAME || "wca",
-    waitForConnections: true,
-    connectionLimit: 10,
-  });
-}
-initDb();
+app.get("/api/statistics/options", ensureAuthenticated, async (_req: Request, res: Response) => {
+  try {
+    res.json(await statisticsService.options());
+  } catch {
+    res.status(503).json({ error: "Statistics data is unavailable. Please try again later." });
+  }
+});
+
+app.get("/api/statistics", ensureAuthenticated, async (req: Request, res: Response) => {
+  try {
+    res.json(await statisticsService.get(req.query));
+  } catch (err: unknown) {
+    if (err instanceof StatisticsInputError) return res.status(400).json({ error: err.message });
+    if (isQueryTimeout(err)) return res.status(408).json({ error: "Statistics took too long to compute. Narrow the filters and try again." });
+    console.error("Statistics query failed", err);
+    res.status(503).json({ error: "Statistics data is unavailable. Please try again later." });
+  }
+});
 
 function validateQuery(q: string): boolean {
   if (!q || typeof q !== "string") return false;
