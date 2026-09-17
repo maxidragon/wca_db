@@ -125,11 +125,14 @@ export function parseStatisticsFilters(
   const eventValue = scalar("event", "333");
   const eventsValue = scalar("events", "");
   const supportedFilters: string[] = definition.filters;
-  const events = supportedFilters.includes("event")
+  const requestedEvents = supportedFilters.includes("event")
     ? [eventValue]
     : [...new Set(eventsValue.split(",").filter(Boolean))];
-  if (events.some((id) => !options.events.some((e) => e.id === id)))
+  if (requestedEvents.some((id) => !options.events.some((e) => e.id === id)))
     throw new StatisticsInputError("Unknown event");
+  const events = options.events
+    .filter((event) => requestedEvents.includes(event.id))
+    .map((event) => event.id);
   if (
     supportedFilters.includes("type") &&
     type === "average" &&
@@ -206,7 +209,10 @@ export function buildStatisticsQuery(
     "records-competition",
     "most-solves-competition",
   ].includes(f.statistic);
-  const resultJoins = `${currentJoins} JOIN competitions c ON c.id=r.competition_id${historicalRegion ? " JOIN countries rc ON rc.id=r.country_id" : ""}${competitionRegion ? " JOIN countries cc ON cc.id=c.country_id" : ""}`;
+  const needsHistoricalCountry =
+    historicalRegion &&
+    (f.region !== "World" || f.statistic.startsWith("top-100"));
+  const resultJoins = `${currentJoins} JOIN competitions c ON c.id=r.competition_id${needsHistoricalCountry ? " JOIN countries rc ON rc.id=r.country_id" : ""}${competitionRegion && f.region !== "World" ? " JOIN countries cc ON cc.id=c.country_id" : ""}`;
   const regionInfo = options.regions.find((r) => r.id === f.region)!;
   const regionCondition = (countryAlias: string) => {
     if (regionInfo.kind === "world") return "1=1";
@@ -254,32 +260,47 @@ export function buildStatisticsQuery(
     case "sum-of-ranks":
     case "sum-of-country-ranks": {
       const country = f.statistic === "sum-of-country-ranks";
+      const field = country ? "world_rank" : rankField;
       const regional = country ? "1=1" : regionCondition("pc");
       const ids = eventIds.map(() => "?").join(",");
       params.push(...eventIds);
-      // Gender is applied after regional ranks and penalties have been established.
       const genderCondition = f.gender === "all" ? "1=1" : "p.gender=?";
       if (f.gender !== "all") params.push(f.gender);
-      const entity = country ? "p.country_id" : "r.person_id";
       const perEvent = eventIds.map(
         (id) =>
           `MAX(CASE WHEN event_id='${id}' THEN event_rank END) AS \`${id}\``,
       );
+      const penaltyColumns = eventIds.map(
+        (id) =>
+          `MAX(CASE WHEN event_id='${id}' THEN penalty END) AS penalty_${id}`,
+      );
+      const regionalJoins =
+        !country && regionInfo.kind !== "world" ? currentJoins : "";
+      // Aggregate numeric ranks before attaching names. Materialize the penalty vector
+      // once, instead of repeating regional scans for every event and every competitor.
       sql = `WITH regional AS (
-        SELECT r.*, p.country_id FROM ranks_${f.type} r ${currentJoins}
-        WHERE ${regional} AND r.event_id IN (${ids}) AND r.${country ? "world_rank" : rankField}>0
+        SELECT r.person_id,r.event_id,r.${field} AS event_rank,r.country_rank
+        FROM ranks_${f.type} r ${regionalJoins}
+        WHERE ${regional} AND r.event_id IN (${ids}) AND r.${field}>0
       ), penalties AS (
-        SELECT event_id, MAX(${country ? "world_rank" : rankField})+1 AS penalty FROM regional GROUP BY event_id
+        SELECT event_id, MAX(event_rank)+1 AS penalty FROM regional GROUP BY event_id
+      ), penalty_totals AS (
+        SELECT SUM(penalty) AS total,${penaltyColumns.join(",")} FROM penalties
       ), entries AS (
-        SELECT ${entity} AS entity_id, r.event_id, MIN(r.${country ? "world_rank" : rankField}) AS event_rank,
-          MAX(p.name) AS person_name, MAX(pc.name) AS country_name
-        FROM regional r ${currentJoins} WHERE ${genderCondition} GROUP BY ${entity}, r.event_id
-      ), sums AS (SELECT entity_id AS ${country ? "country_id" : "person_id"}, MAX(person_name) AS person_name,
-        MAX(country_name) AS country_name,
-        (SELECT COALESCE(SUM(penalty),0) FROM penalties)+SUM(event_rank-penalty) AS sum,
-        ${perEvent.join(",")}
-        FROM entries JOIN penalties USING(event_id) GROUP BY entity_id)
-        SELECT sums.*${eventIds.map((id) => `, COALESCE(sums.\`${id}\`, (SELECT penalty FROM penalties WHERE event_id='${id}')) AS penalty_${id}`).join("")} FROM sums`;
+        ${
+          country
+            ? `SELECT p.country_id AS entity_id,r.event_id,MIN(r.event_rank) AS event_rank
+             FROM regional r JOIN persons p ON p.wca_id=r.person_id AND p.sub_id=1
+             WHERE ${genderCondition}${f.gender === "all" ? " AND r.country_rank=1" : ""}
+             GROUP BY p.country_id,r.event_id`
+            : "SELECT person_id AS entity_id,event_id,event_rank FROM regional"
+        }
+      ), sums AS (
+        SELECT entity_id AS ${country ? "country_id" : "person_id"},
+          MAX(pt.total)+SUM(event_rank-penalty) AS sum,${perEvent.join(",")},
+          ${eventIds.map((id) => `MAX(pt.penalty_${id}) AS penalty_${id}`).join(",")}
+        FROM entries JOIN penalties USING(event_id) CROSS JOIN penalty_totals pt GROUP BY entity_id
+      ) SELECT r.*,${country ? "pc.name AS country_name FROM sums r JOIN countries pc ON pc.id=r.country_id" : `p.name AS person_name,pc.name AS country_name FROM sums r ${currentJoins} WHERE ${genderCondition}`}`;
       columns = [
         ...(country ? [countryColumn] : [personColumn, countryColumn]),
         { key: "sum", label: "Sum" },
@@ -340,9 +361,26 @@ export function buildStatisticsQuery(
       break;
     case "top-100":
     case "top-100-appearances": {
-      const value = f.type === "single" ? "a.value" : "r.average";
-      const source = `SELECT r.id AS result_id, r.person_id, p.name AS person_name, rc.name AS country_name, r.competition_id, c.name AS competition_name, r.event_id, ${value} AS value${f.type === "single" ? ", a.attempt_number" : ""} FROM results r ${resultJoins} ${f.type === "single" ? "JOIN result_attempts a ON a.result_id=r.id" : ""} WHERE ${conditions("rc", [`${value}>0`])}`;
-      sql = `WITH eligible AS (${source}), top_results AS (SELECT eligible.*, RANK() OVER (ORDER BY value) AS result_rank FROM eligible) SELECT * FROM top_results WHERE result_rank<=100`;
+      const roundValue = f.type === "single" ? "r.best" : "r.average";
+      const indexedOrder =
+        f.region === "World" && f.gender === "all" && f.year === null
+          ? "STRAIGHT_JOIN "
+          : "";
+      const roundJoins = indexedOrder
+        ? resultJoins.replace(/\bJOIN\b/g, "STRAIGHT_JOIN")
+        : resultJoins;
+      const rounds = `SELECT r.id AS result_id, r.person_id, p.name AS person_name, rc.name AS country_name, r.competition_id, c.name AS competition_name, r.event_id, ${roundValue} AS round_value FROM results r ${roundJoins} WHERE ${conditions("rc", [`${roundValue}>0`])}`;
+      // Every successful round supplies at least one attempt equal to its best.
+      // The 100th round best is therefore a safe upper bound on the 100th attempt.
+      // Use indexed round results to restrict the attempt sort, retaining all cutoff ties.
+      sql = `WITH eligible_rounds AS (${rounds}), cutoff AS (
+        SELECT MAX(round_value) AS value FROM (SELECT round_value FROM eligible_rounds ORDER BY round_value LIMIT 100) fastest_rounds
+      ), eligible AS (
+        SELECT er.*, ${f.type === "single" ? "a.value, a.attempt_number" : "er.round_value AS value"}
+        FROM eligible_rounds er ${f.type === "single" ? "JOIN result_attempts a ON a.result_id=er.result_id" : ""}
+        WHERE er.round_value<=(SELECT value FROM cutoff)${f.type === "single" ? " AND a.value>0 AND a.value<=(SELECT value FROM cutoff)" : ""}
+      ), top_results AS (SELECT eligible.*, RANK() OVER (ORDER BY value) AS result_rank FROM eligible)
+      SELECT * FROM top_results WHERE result_rank<=100`;
       if (f.statistic === "top-100-appearances") {
         sql = `WITH top_results AS (${sql}) SELECT person_id, MAX(person_name) AS person_name, MAX(country_name) AS country_name, COUNT(*) AS count FROM top_results GROUP BY person_id`;
       } else {
@@ -395,7 +433,7 @@ export function buildStatisticsQuery(
               `SUM(CASE WHEN COALESCE(r.regional_${type}_record,'') ${condition} THEN 1 ELSE 0 END)`,
           )
           .join("+");
-      sql = `WITH records AS (SELECT ${competition ? competitionSelect : personSelect}, ${recordSum("='WR'")} AS wr, ${recordSum("NOT IN ('','WR','NR')")} AS cr, ${recordSum("='NR'")} AS nr FROM results r ${resultJoins} WHERE ${conditions(competition ? "cc" : "rc")} GROUP BY r.${competition ? "competition_id" : "person_id"}) SELECT records.*, wr*10+cr*5+nr AS score FROM records WHERE wr+cr+nr>0`;
+      sql = `WITH records AS (SELECT ${competition ? competitionSelect : personSelect}, ${recordSum("='WR'")} AS wr, ${recordSum("NOT IN ('','WR','NR')")} AS cr, ${recordSum("='NR'")} AS nr FROM results r ${resultJoins} WHERE ${conditions(competition ? "cc" : "rc", ["(r.regional_single_record<>'' OR r.regional_average_record<>'')"])} GROUP BY r.${competition ? "competition_id" : "person_id"}) SELECT records.*, wr*10+cr*5+nr AS score FROM records WHERE wr+cr+nr>0`;
       columns = [
         competition ? competitionColumn : personColumn,
         ...["score", "wr", "cr", "nr"].map((key) => ({
@@ -593,31 +631,89 @@ export async function getStatistics(
   };
 }
 
-// Bound memory and deduplicate simultaneous expensive queries; an updated export changes keys.
+// Results are immutable within a WCA export. Cache ten adjacent pages per query,
+// bounded by row count, and share their computation across concurrent requests.
 export function createStatisticsService(pool: Pool) {
+  type Result = Awaited<ReturnType<typeof getStatistics>>;
   let optionsCache: { value: StatisticsOptions; expires: number } | undefined;
   let pendingOptions: Promise<StatisticsOptions> | undefined;
-  const cache = new Map<
-    string,
-    { expires: number; value: Awaited<ReturnType<typeof getStatistics>> }
-  >();
-  const pending = new Map<
-    string,
-    Promise<Awaited<ReturnType<typeof getStatistics>>>
-  >();
+  const cache = new Map<string, Result>();
+  const pending = new Map<string, Promise<Result>>();
+  const chunks = new Map<string, { value: Result; expires: number }>();
+  const pendingChunks = new Map<string, Promise<Result>>();
+  let cachedRows = 0;
   const options = async () => {
     if (optionsCache && optionsCache.expires > Date.now())
       return optionsCache.value;
-    if (!pendingOptions)
-      pendingOptions = getStatisticsOptions(pool)
-        .then((value) => {
-          optionsCache = { value, expires: Date.now() + 60000 };
-          return value;
-        })
-        .finally(() => {
-          pendingOptions = undefined;
-        });
+    if (!pendingOptions) {
+      pendingOptions = (async () => {
+        if (optionsCache?.value.export_timestamp) {
+          const [[row]] = await pool.query<RowDataPacket[]>(
+            `SET STATEMENT max_statement_time=${statementTimeout()} FOR SELECT value FROM wca_statistics_metadata WHERE field='export_timestamp' LIMIT 1`,
+          );
+          if (row?.value === optionsCache.value.export_timestamp) {
+            optionsCache.expires = Date.now() + 60000;
+            return optionsCache.value;
+          }
+        }
+        const value = await getStatisticsOptions(pool);
+        // Drop references to previous exports instead of waiting for eviction.
+        cache.clear();
+        chunks.clear();
+        cachedRows = 0;
+        optionsCache = { value, expires: Date.now() + 60000 };
+        return value;
+      })().finally(() => {
+        pendingOptions = undefined;
+      });
+    }
     return pendingOptions;
+  };
+  const getChunk = async (
+    filters: StatisticsFilters,
+    metadata: StatisticsOptions,
+  ) => {
+    const chunkFilters = {
+      ...filters,
+      page: Math.floor((filters.page - 1) / 10) + 1,
+      page_size: filters.page_size * 10,
+    };
+    const key = JSON.stringify([metadata.export_timestamp, chunkFilters]);
+    const hit = chunks.get(key);
+    if (hit && hit.expires > Date.now()) {
+      chunks.delete(key);
+      chunks.set(key, hit);
+      return hit.value;
+    }
+    if (hit) {
+      chunks.delete(key);
+      cachedRows -= hit.value.rows.length;
+    }
+    if (pendingChunks.has(key)) return pendingChunks.get(key)!;
+    const task = getStatistics(pool, chunkFilters, metadata)
+      .then((value) => {
+        // An older in-flight export must not repopulate the cache after a refresh.
+        if (optionsCache?.value !== metadata) return value;
+        while (
+          chunks.size &&
+          (chunks.size >= 100 || cachedRows + value.rows.length > 10000)
+        ) {
+          const oldest = chunks.keys().next().value!;
+          cachedRows -= chunks.get(oldest)!.value.rows.length;
+          chunks.delete(oldest);
+        }
+        chunks.set(key, {
+          value,
+          expires: metadata.export_timestamp ? Infinity : Date.now() + 300000,
+        });
+        cachedRows += value.rows.length;
+        return value;
+      })
+      .finally(() => {
+        pendingChunks.delete(key);
+      });
+    pendingChunks.set(key, task);
+    return task;
   };
   return {
     options,
@@ -625,13 +721,23 @@ export function createStatisticsService(pool: Pool) {
       const metadata = await options();
       const filters = parseStatisticsFilters(query, metadata);
       const key = JSON.stringify([metadata.export_timestamp, filters]);
-      const hit = cache.get(key);
-      if (hit && hit.expires > Date.now()) return hit.value;
+      // Without export metadata, use the finite chunk lifetime rather than page caching.
+      if (metadata.export_timestamp && cache.has(key)) return cache.get(key)!;
       if (pending.has(key)) return pending.get(key)!;
-      const task = getStatistics(pool, filters, metadata)
-        .then((value) => {
-          if (cache.size >= 100) cache.delete(cache.keys().next().value!);
-          cache.set(key, { value, expires: Date.now() + 300000 });
+      const task = getChunk(filters, metadata)
+        .then((chunk) => {
+          const offset = ((filters.page - 1) % 10) * filters.page_size;
+          const value = {
+            ...chunk,
+            filters,
+            page: filters.page,
+            page_size: filters.page_size,
+            rows: chunk.rows.slice(offset, offset + filters.page_size),
+          };
+          if (optionsCache?.value === metadata && metadata.export_timestamp) {
+            if (cache.size >= 100) cache.delete(cache.keys().next().value!);
+            cache.set(key, value);
+          }
           return value;
         })
         .finally(() => {

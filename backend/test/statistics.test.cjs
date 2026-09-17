@@ -561,3 +561,221 @@ integration(
     );
   },
 );
+
+function fakeStatisticsPool() {
+  const state = {
+    exportTimestamp: "2026-09-01 00:00:00",
+    statements: [],
+    seed: 0,
+  };
+  const pool = {
+    async query(sql, params = []) {
+      state.statements.push({ sql, params });
+      if (sql.includes("WHERE field='export_timestamp'"))
+        return [[{ value: state.exportTimestamp }]];
+      if (sql.includes("SELECT id, name FROM countries"))
+        return [[{ id: "China", name: "China" }]];
+      if (sql.includes("SELECT id, name FROM continents"))
+        return [[{ id: "_Asia", name: "Asia" }]];
+      if (sql.includes("SELECT e.id, e.name, EXISTS"))
+        return [
+          [
+            { id: "222", name: "2x2x2", has_average: 1 },
+            { id: "333", name: "3x3x3", has_average: 1 },
+          ],
+        ];
+      if (sql.includes("SELECT DISTINCT YEAR")) return [[{ year: 2025 }]];
+      if (sql.endsWith("SELECT COUNT(*) AS total FROM standings"))
+        return [[{ total: 25 }]];
+      const limit = params.at(-2),
+        offset = params.at(-1);
+      return [
+        Array.from({ length: 25 }, (_, index) => ({
+          person_id: `person-${index}`,
+          person_name: `Person ${index}`,
+          country_name: "China",
+          count: state.seed + 25 - index,
+          rank: index + 1,
+          total: 25,
+        })).slice(offset, offset + limit),
+      ];
+    },
+  };
+  return {
+    pool,
+    state,
+    computations: () =>
+      state.statements.filter((s) => s.sql.includes("RANK() OVER")).length,
+  };
+}
+
+test("adjacent pages share one computation, concurrent requests share chunks, and chunk boundaries preserve ranks", async () => {
+  const { pool, computations } = fakeStatisticsPool();
+  const service = createStatisticsService(pool);
+  const [first, second] = await Promise.all([
+    service.get({ page_size: "2" }),
+    service.get({ page_size: "2", page: "2" }),
+  ]);
+  assert.equal(computations(), 1);
+  assert.deepEqual(
+    first.rows.map((r) => r.rank),
+    [1, 2],
+  );
+  assert.deepEqual(
+    second.rows.map((r) => r.rank),
+    [3, 4],
+  );
+  assert.equal(second.page, 2);
+  assert.equal(second.page_size, 2);
+  assert.equal(second.total, 25);
+  const boundary = await service.get({ page_size: "2", page: "11" });
+  assert.equal(computations(), 2);
+  assert.deepEqual(
+    boundary.rows.map((r) => r.rank),
+    [21, 22],
+  );
+  const last = await service.get({ page_size: "2", page: "13" });
+  assert.equal(computations(), 2);
+  assert.deepEqual(
+    last.rows.map((r) => r.rank),
+    [25],
+  );
+  const empty = await service.get({ page_size: "2", page: "999" });
+  assert.deepEqual(empty.rows, []);
+  assert.equal(empty.total, 25);
+});
+
+test("equivalent event selections reuse the same cached query", async () => {
+  const { pool, computations } = fakeStatisticsPool();
+  const service = createStatisticsService(pool);
+  const a = await service.get({ events: "333,222,333" }),
+    b = await service.get({ events: "222,333" });
+  assert.strictEqual(a, b);
+  assert.equal(computations(), 1);
+  assert.deepEqual(a.filters.events, ["222", "333"]);
+});
+
+test("metadata refresh checks only the timestamp and an updated export invalidates cached pages", async (t) => {
+  let clock = 1000;
+  t.mock.method(Date, "now", () => clock);
+  const { pool, state, computations } = fakeStatisticsPool();
+  const service = createStatisticsService(pool);
+  const initial = await service.get({});
+  const calls = state.statements.length;
+  clock += 60001;
+  await service.options();
+  assert.equal(state.statements.length, calls + 1);
+  assert.ok(
+    state.statements.at(-1).sql.includes("WHERE field='export_timestamp'"),
+  );
+  assert.strictEqual(await service.get({}), initial);
+  state.exportTimestamp = "2026-09-02 00:00:00";
+  state.seed = 100;
+  clock += 60001;
+  const refreshed = await service.get({});
+  assert.equal(computations(), 2);
+  assert.notStrictEqual(initial, refreshed);
+  assert.equal(refreshed.export_timestamp, state.exportTimestamp);
+  assert.equal(refreshed.rows[0].count, 125);
+});
+
+test("cached rows stay bounded and an evicted chunk is recomputed correctly", async () => {
+  const { pool, state, computations } = fakeStatisticsPool();
+  const base = pool.query.bind(pool);
+  pool.query = async (sql, params) => {
+    const result = await base(sql, params);
+    if (sql.includes("RANK() OVER")) {
+      const limit = params.at(-2),
+        offset = params.at(-1);
+      return [
+        Array.from({ length: limit }, (_, index) => ({
+          person_id: `person-${offset + index}`,
+          person_name: `Person ${offset + index}`,
+          country_name: "China",
+          count: 20000 - offset - index,
+          rank: offset + index + 1,
+          total: 20000,
+        })),
+      ];
+    }
+    return result;
+  };
+  const service = createStatisticsService(pool);
+  for (let chunk = 0; chunk < 11; chunk++)
+    await service.get({ page_size: "100", page: String(chunk * 10 + 1) });
+  assert.equal(computations(), 11);
+  // Page 2 has not been individually cached; its first chunk was evicted by the row budget.
+  const page = await service.get({ page_size: "100", page: "2" });
+  assert.equal(computations(), 12);
+  assert.equal(page.rows[0].rank, 101);
+  assert.ok(state.statements.length > 11);
+});
+
+integration(
+  "top-100 candidate reduction matches a full-attempt ranking with more than 100 rounds",
+  async () => {
+    const results = [],
+      attempts = [];
+    for (let index = 0; index < 220; index++) {
+      const id = 10000 + index;
+      const best = 500 + index;
+      results.push([
+        id,
+        "2025AAAA01",
+        "China",
+        "China2025",
+        "333",
+        "1",
+        1,
+        best,
+        best + 200,
+        "",
+        "",
+      ]);
+      for (let slot = 1; slot <= 5; slot++)
+        attempts.push([id, slot, best + (slot - 1) * 100]);
+    }
+    await pool.query("INSERT INTO results VALUES ?", [results]);
+    await pool.query("INSERT INTO result_attempts VALUES ?", [attempts]);
+    try {
+      const optimized = await run({
+        statistic: "top-100",
+        event: "333",
+        type: "single",
+        page_size: "100",
+      });
+      const [expected] = await pool.query(`WITH all_attempts AS (
+      SELECT r.id AS result_id,r.person_id,p.name AS person_name,a.attempt_number,a.value,
+        RANK() OVER (ORDER BY a.value) AS rank
+      FROM results r JOIN result_attempts a ON a.result_id=r.id
+      JOIN persons p ON p.wca_id=r.person_id AND p.sub_id=1
+      WHERE r.event_id='333' AND a.value>0
+    ) SELECT * FROM all_attempts WHERE rank<=100 ORDER BY value,person_name,person_id,result_id,attempt_number`);
+      assert.equal(optimized.total, expected.length);
+      const shape = (row) => [
+        row.result_id,
+        row.attempt_number,
+        row.value,
+        row.rank,
+      ];
+      assert.deepEqual(
+        optimized.rows.map(shape),
+        expected.slice(0, 100).map(shape),
+      );
+      const remaining = await run({
+        statistic: "top-100",
+        event: "333",
+        type: "single",
+        page_size: "100",
+        page: "2",
+      });
+      assert.deepEqual(
+        remaining.rows.map(shape),
+        expected.slice(100).map(shape),
+      );
+    } finally {
+      await pool.query("DELETE FROM result_attempts WHERE result_id>=10000");
+      await pool.query("DELETE FROM results WHERE id>=10000");
+    }
+  },
+);

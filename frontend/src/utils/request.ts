@@ -9,9 +9,12 @@ export const backendRequest = async (
   path: string,
   method: "GET" | "POST" = "GET",
   auth = true,
-  body?: any
+  body?: unknown,
+  signal?: AbortSignal,
 ): Promise<Response> => {
-  const headers: any = { "Content-Type": "application/json" };
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
   if (auth) {
     const token = localStorage.getItem(TOKEN_NAME);
     if (token) headers.Authorization = `Bearer ${token}`;
@@ -20,5 +23,6 @@ export const backendRequest = async (
     method,
     headers,
     body: body ? JSON.stringify(body) : undefined,
+    signal,
   });
 };

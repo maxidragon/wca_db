@@ -22,7 +22,7 @@ The **Statistics** navigation tab (`/statistics`) provides 19 views for explorin
 | All events achiever | Region, gender |
 | Most nth place | Region, gender, year, events, 2nd/4th, include DNF/DNS |
 
-Selecting one event provides the per-event medal and placement variants; selecting a year provides yearly personal-solve standings. The **2×2 to 5×5** preset provides the corresponding rank-sum variants. Selected filters and pagination are stored in the URL and restored on reload or browser navigation.
+Selecting one event provides the per-event medal and placement variants; selecting a year provides yearly personal-solve standings. The **2×2 to 5×5** preset provides the corresponding rank-sum variants. Selected filters and pagination are stored in the URL. Opening the page, including a filtered URL, restores the filters without querying statistics. Click **Show statistics** to load results. After submission, pagination and browser history load the selected results; **Reset filters** clears results and returns to the idle state.
 
 Region supports the world, all continents, and all countries in the export. Competition statistics use the competition location. Competitor statistics use current nationality for rank sums, medals, solves, and all-events completion, and nationality at the time of the result for attendance, placements, top-100 results, records set, and missers. Year filters use competition start dates. Gender selects competitors while retaining official placements and regional event ranks.
 
@@ -30,7 +30,7 @@ Top-100 singles count individual attempts rather than round bests and include al
 
 Best podiums use official WCA finals, including successful-attempt means for Fewest Moves and points for Multi-Blind. Combined dual Fewest Moves results require competition metadata outside the WCA export and are not reconstructed. Standing-record age is measured at the export date, so it remains consistent with the dataset.
 
-The API exposes authenticated `GET /api/statistics/options` and `GET /api/statistics`. The latter accepts a `statistic` ID, its supported filters, `page` (default 1), and `page_size` (default 50, maximum 100). Multiple events use a comma-separated `events` value. Unsupported or invalid filters return 400. Queries use MariaDB’s database-enforced statement timeout (`QUERY_TIMEOUT_SECONDS`, default 60 seconds, capped at 300 for statistics). Results are cached for five minutes, with at most 100 entries and keys tied to the export timestamp. Filter metadata is refreshed after one minute; simultaneous identical requests share a computation. No extra tables or precomputation are required.
+The API exposes authenticated `GET /api/statistics/options` and `GET /api/statistics`. The latter accepts a `statistic` ID, its supported filters, `page` (default 1), and `page_size` (default 50, maximum 100). Multiple events use a comma-separated `events` value. Unsupported or invalid filters return 400. Queries use MariaDB’s database-enforced statement timeout (`QUERY_TIMEOUT_SECONDS`, default 60 seconds, capped at 300 for statistics). Results are cached in chunks of ten adjacent pages, so pagination reuses the same computation. Chunk storage is limited to 100 entries and 10,000 rows, with at most 100 individual page responses retained. Cache keys use the export timestamp and canonical event selections; results stay valid for that export until evicted. The export timestamp is checked once per minute, and unchanged exports reuse the existing filter metadata. An updated export clears cached chunks and pages; without an export timestamp, chunks expire after five minutes. Concurrent requests for pages in the same chunk share a computation. No extra tables or precomputation are required.
 
 ## Development and validation
 
@@ -46,4 +46,4 @@ npm run test:statistics
 TEST_DB_SOCKET=/path/to/test-mariadb.sock npm run test:statistics
 ```
 
-Without `TEST_DB_SOCKET`, filter-validation tests run and database tests are skipped. Integration tests create a uniquely named fixture database on the supplied socket using its local root account, exercise every statistic and filter combination, check calculations and pagination, and drop only that fixture database afterward. They never load the project’s `.env` or use its production connection settings.
+Without `TEST_DB_SOCKET`, filter-validation and cache-behavior tests run and database integration tests are skipped. Integration tests create a uniquely named fixture database on the supplied socket using its local root account, exercise every statistic and filter combination, check calculations and pagination, and drop only that fixture database afterward. They never load the project’s `.env` or use its production connection settings.
