@@ -33,6 +33,11 @@ jobs:
     - name: Build frontend
       run: npm run build
       working-directory: ./frontend
+    # Deploys do not import, so a database last imported before statistics_entries existed
+    # would serve 503s until the nightly import. Builds it once; a no-op after that.
+    - name: Ensure statistics entries exist
+      run: ./compute_statistics_entries.sh --if-missing
+      working-directory: ./backend
     - name: Restart service
       run: pm2 restart wca-db-backend -s || pm2 start dist/index.js --name wca-db-backend -s
       working-directory: ./backend
