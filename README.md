@@ -59,3 +59,5 @@ TEST_DB_SOCKET=/path/to/test-mariadb.sock npm test
 ```
 
 Without `TEST_DB_SOCKET`, filter-validation and cache-behavior tests run and database integration tests are skipped; the person tests are integration tests throughout. Integration tests create a uniquely named fixture database on the supplied socket using its local root account, exercise every statistic and filter combination, check calculations and pagination, and drop only that fixture database afterward. They never load the project’s `.env` or use its production connection settings.
+
+Every pull request, and every push to `main`, runs these same checks: the backend tests against a MariaDB installed on the runner, and the frontend lint and build. The workflow uses GitHub-hosted runners rather than the self-hosted one the deploy and import workflows use, so a test run never touches the server holding the imported export.
