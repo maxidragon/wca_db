@@ -49,6 +49,19 @@ export interface StatisticsFilters {
   page_size: number;
 }
 
+// The entry table is built by the import, so a database imported before it existed has no
+// entries and the statistics that read them would fail with a bare SQL error instead.
+export async function statisticsEntriesReady(pool: Pool): Promise<boolean> {
+  try {
+    const [[row]] = await pool.query<RowDataPacket[]>(
+      "SELECT 1 AS ok FROM statistics_entries LIMIT 1",
+    );
+    return Boolean(row);
+  } catch {
+    return false;
+  }
+}
+
 export async function getStatisticsOptions(
   pool: Pool,
 ): Promise<StatisticsOptions> {
@@ -194,8 +207,9 @@ const resultColumn: Column = {
 const countColumn: Column = { key: "count", label: "Count" };
 const dateColumn: Column = { key: "date", label: "Date", format: "date" };
 const finalCondition = "r.round_type_id IN ('c','f') AND r.best>0";
-const personJoin = "JOIN persons p ON p.wca_id=r.person_id AND p.sub_id=1";
-const currentJoins = `${personJoin} JOIN countries pc ON pc.id=p.country_id`;
+const personJoin = (alias: string) =>
+  `JOIN persons p ON p.wca_id=${alias}.person_id AND p.sub_id=1`;
+const currentJoins = `${personJoin("r")} JOIN countries pc ON pc.id=p.country_id`;
 const preferredType = (event: string): "single" | "average" =>
   ["333bf", "444bf", "555bf", "333mbf"].includes(event) ? "single" : "average";
 
@@ -223,6 +237,18 @@ export function buildStatisticsQuery(
     "records-competition",
     "most-solves-competition",
   ].includes(f.statistic);
+  // These aggregate every result in the export rather than a slice of it, so they read the
+  // precomputed entries instead: one row per competitor, competition and event, carrying
+  // the solve counts, which is a fifth of the rows and none of the attempt table.
+  const fromEntries = [
+    "most-competitions",
+    "most-persons",
+    "most-solves",
+    "most-solves-person-competition",
+    "most-solves-competition",
+  ].includes(f.statistic);
+  const source = fromEntries ? "statistics_entries e" : "results r";
+  const row = fromEntries ? "e" : "r";
   const regionInfo = options.regions.find((r) => r.id === f.region)!;
   const world = regionInfo.kind === "world";
   const regionAlias = historicalRegion ? "rc" : competitionRegion ? "cc" : "pc";
@@ -249,13 +275,13 @@ export function buildStatisticsQuery(
     competition?: boolean;
   } = {}) =>
     [
-      person || joinsPerson ? personJoin : null,
+      person || joinsPerson ? personJoin(row) : null,
       filtersCurrentCountry ? "JOIN countries pc ON pc.id=p.country_id" : null,
       historicalCountry || (!world && regionAlias === "rc")
-        ? "JOIN countries rc ON rc.id=r.country_id"
+        ? `JOIN countries rc ON rc.id=${row}.country_id`
         : null,
       competition || f.year !== null || (!world && regionAlias === "cc")
-        ? "JOIN competitions c ON c.id=r.competition_id"
+        ? `JOIN competitions c ON c.id=${row}.competition_id`
         : null,
       !world && regionAlias === "cc"
         ? "JOIN countries cc ON cc.id=c.country_id"
@@ -278,7 +304,7 @@ export function buildStatisticsQuery(
       params.push(`${f.year}-01-01`, `${f.year + 1}-01-01`);
     }
     if (events && f.events.length) {
-      parts.push(`r.event_id IN (${f.events.map(() => "?").join(",")})`);
+      parts.push(`${row}.event_id IN (${f.events.map(() => "?").join(",")})`);
       params.push(...f.events);
     }
     return parts.join(" AND ");
@@ -361,12 +387,12 @@ export function buildStatisticsQuery(
       break;
     }
     case "most-competitions": {
-      const attended = `SELECT r.person_id, COUNT(DISTINCT r.competition_id) AS count FROM results r ${rowJoins()} WHERE ${rowConditions()} GROUP BY r.person_id`;
+      const attended = `SELECT e.person_id, COUNT(DISTINCT e.competition_id) AS count FROM ${source} ${rowJoins()} WHERE ${rowConditions()} GROUP BY e.person_id`;
       sql = withPersonNames(attended);
       break;
     }
     case "most-persons": {
-      const competitors = `SELECT r.competition_id, COUNT(DISTINCT r.person_id) AS count FROM results r ${rowJoins()} WHERE ${rowConditions()} GROUP BY r.competition_id`;
+      const competitors = `SELECT e.competition_id, COUNT(DISTINCT e.person_id) AS count FROM ${source} ${rowJoins()} WHERE ${rowConditions()} GROUP BY e.competition_id`;
       sql = withCompetitionNames(competitors);
       columns = [competitionColumn, dateColumn, countColumn];
       break;
@@ -377,14 +403,13 @@ export function buildStatisticsQuery(
       const competition = f.statistic === "most-solves-competition";
       const personalCompetition =
         f.statistic === "most-solves-person-competition";
-      // Count attempts per competition first, even when the standings are per competitor.
-      // Results are stored in competition order and their attempts follow, so this reads
-      // both tables in the order they lie on disk; grouping straight by competitor instead
-      // visits thirty million attempt rows in an order unrelated to how they are stored.
+      // Sum per competition first, even when the standings are per competitor: entries are
+      // stored competition-first, so this comes out of an ordered scan and only the far
+      // smaller result of it is regrouped.
       const key = competition
-        ? "r.competition_id"
-        : "r.competition_id, r.person_id";
-      let counts = `SELECT ${key}, SUM(a.value>0) AS solves, SUM(a.value<>0) AS attempts FROM results r ${rowJoins()} JOIN result_attempts a ON a.result_id=r.id WHERE ${rowConditions()} GROUP BY ${key}`;
+        ? "e.competition_id"
+        : "e.competition_id, e.person_id";
+      let counts = `SELECT ${key}, SUM(e.solves) AS solves, SUM(e.attempts) AS attempts FROM ${source} ${rowJoins()} WHERE ${rowConditions()} GROUP BY ${key}`;
       if (personalCompetition) {
         // Pick each competitor's best competition before attaching names: which competition
         // wins does not depend on who the competitor is, and the ranking sorts every
