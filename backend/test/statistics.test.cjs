@@ -4,6 +4,7 @@ const mysql = require("mysql2/promise");
 const { STATISTICS } = require("../dist/statistics_catalog");
 const {
   parseStatisticsFilters,
+  buildStatisticsQuery,
   getStatisticsOptions,
   getStatistics,
   createStatisticsService,
@@ -56,6 +57,46 @@ test("rejects invalid, repeated and unsupported filters, including SQL injection
   ])
     assert.throws(() => parse(q));
 });
+test("the aggregation joins only the tables a filter or an output value reads", () => {
+  const build = (query) =>
+    buildStatisticsQuery(
+      parseStatisticsFilters(query, fixtureOptions),
+      fixtureOptions,
+    ).sql;
+  // Everything between the results table and the grouping: what each result row is joined
+  // to. Names are attached after the grouping instead, so they must not appear here.
+  const scan = (sql) =>
+    sql.slice(sql.indexOf("FROM results r"), sql.indexOf("GROUP BY"));
+  const unfiltered = build({ statistic: "most-competitions" });
+  for (const table of ["persons", "countries", "competitions"])
+    assert.ok(
+      !scan(unfiltered).includes(`JOIN ${table}`),
+      `unfiltered attendance should not join ${table} per result row`,
+    );
+  assert.match(unfiltered, /JOIN persons p ON p\.wca_id=s\.person_id/);
+  assert.match(unfiltered, /JOIN countries pc ON pc\.id=p\.country_id/);
+  assert.match(
+    scan(build({ statistic: "most-competitions", gender: "f" })),
+    /JOIN persons/,
+  );
+  assert.match(
+    scan(build({ statistic: "most-competitions", year: "2025" })),
+    /JOIN competitions/,
+  );
+  assert.match(
+    scan(build({ statistic: "most-competitions", region: "China" })),
+    /JOIN countries rc/,
+  );
+  assert.match(
+    scan(build({ statistic: "medal-collection", region: "China" })),
+    /JOIN countries pc/,
+  );
+  assert.match(
+    scan(build({ statistic: "most-persons", region: "China" })),
+    /JOIN countries cc/,
+  );
+});
+
 const socket = process.env.TEST_DB_SOCKET;
 let admin, pool, options;
 const database = `wca_statistics_test_${process.pid}`;
