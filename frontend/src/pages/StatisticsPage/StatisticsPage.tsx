@@ -76,7 +76,10 @@ export default function StatisticsPage() {
   const [options, setOptions] = useState<Options | null>(null);
   const [result, setResult] = useState<Result | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingOptions, setIsLoadingOptions] = useState(true);
+  const [hasSubmitted, setHasSubmitted] = useState(false);
+  const [optionsRetry, setOptionsRetry] = useState(0);
   const [retry, setRetry] = useState(0);
   const [draft, setDraft] = useState(() => new URLSearchParams(searchParams));
   const queryString = searchParams.toString();
@@ -88,51 +91,69 @@ export default function StatisticsPage() {
   const selectedEvents = (draft.get("events") || "").split(",").filter(Boolean);
 
   useEffect(() => {
-    let cancelled = false;
-    backendRequest("api/statistics/options")
+    const controller = new AbortController();
+    setIsLoadingOptions(true);
+    backendRequest(
+      "api/statistics/options",
+      "GET",
+      true,
+      undefined,
+      controller.signal,
+    )
       .then(readResponse<Options>)
       .then((data) => {
-        if (!cancelled) setOptions(data);
+        if (!controller.signal.aborted) setOptions(data);
       })
       .catch((err: unknown) => {
-        if (!cancelled) {
+        if (!controller.signal.aborted) {
           setError(
             err instanceof Error ? err.message : "Unable to load filters",
           );
-          setIsLoading(false);
         }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setIsLoadingOptions(false);
       });
     return () => {
-      cancelled = true;
+      controller.abort();
     };
-  }, [retry]);
+  }, [optionsRetry]);
 
   useEffect(() => {
-    if (!options) return;
-    let cancelled = false;
+    setDraft(new URLSearchParams(queryString));
+  }, [queryString]);
+
+  useEffect(() => {
+    if (!options || !hasSubmitted) return;
+    const controller = new AbortController();
     const params = new URLSearchParams(queryString);
-    setDraft(params);
     setIsLoading(true);
     setError(null);
     setResult(null);
-    backendRequest(`api/statistics?${params}`)
+    backendRequest(
+      `api/statistics?${params}`,
+      "GET",
+      true,
+      undefined,
+      controller.signal,
+    )
       .then(readResponse<Result>)
       .then((data) => {
-        if (!cancelled) setResult(data);
+        if (!controller.signal.aborted) setResult(data);
       })
       .catch((err: unknown) => {
-        if (!cancelled)
+        if (!controller.signal.aborted)
           setError(
             err instanceof Error ? err.message : "Unable to load statistics",
           );
       })
       .finally(() => {
-        if (!cancelled) setIsLoading(false);
+        if (!controller.signal.aborted) setIsLoading(false);
       });
     return () => {
-      cancelled = true;
+      controller.abort();
     };
-  }, [queryString, options, retry]);
+  }, [queryString, options, retry, hasSubmitted]);
 
   const change = (key: string, value: string) => {
     setDraft((previous) => {
@@ -147,6 +168,7 @@ export default function StatisticsPage() {
     e.preventDefault();
     const next = new URLSearchParams(draft);
     next.delete("page");
+    setHasSubmitted(true);
     if (next.toString() === queryString) setRetry((value) => value + 1);
     else setSearchParams(next);
   };
@@ -475,9 +497,12 @@ export default function StatisticsPage() {
             <button
               type="button"
               onClick={() => {
+                setHasSubmitted(false);
+                setResult(null);
+                setError(null);
+                setIsLoading(false);
                 setDraft(new URLSearchParams());
-                if (!queryString) setRetry((value) => value + 1);
-                else setSearchParams({});
+                setSearchParams({});
               }}
               className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 cursor-pointer"
             >
@@ -486,7 +511,17 @@ export default function StatisticsPage() {
           </div>
         </form>
       )}
-      <div aria-live="polite" aria-busy={isLoading}>
+      <div aria-live="polite" aria-busy={isLoading || isLoadingOptions}>
+        {isLoadingOptions && (
+          <p className="py-8 text-center text-gray-500" role="status">
+            Loading filters…
+          </p>
+        )}
+        {options && !hasSubmitted && !error && (
+          <p className="py-8 text-center text-gray-500">
+            Choose a statistic and filters, then click Show statistics.
+          </p>
+        )}
         {isLoading && (
           <p className="py-8 text-center text-gray-500" role="status">
             Loading statistics…
@@ -502,8 +537,8 @@ export default function StatisticsPage() {
               type="button"
               onClick={() => {
                 setError(null);
-                setIsLoading(true);
-                setRetry((value) => value + 1);
+                if (options) setRetry((value) => value + 1);
+                else setOptionsRetry((value) => value + 1);
               }}
               className="ml-3 underline cursor-pointer"
             >
