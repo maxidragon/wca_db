@@ -8,21 +8,32 @@ function statementTimeout() {
     Math.min(300, Number(process.env.QUERY_TIMEOUT_SECONDS) || 60),
   );
 }
-// A statistic groups and sorts the whole export. MariaDB's defaults are sized for ordinary
-// queries, so the temporary tables and sorts these build spill to disk part way through and
-// the query slows by several times. Raise the ceilings for the statement rather than the
-// server: the pool can run ten of these at once, and each one only claims what it uses.
-function statementMemory() {
+// A statistic groups the whole export into a temporary table, and at MariaDB's 16MB default
+// that table spills to disk part way through and the query slows by three to four times.
+// Raising it for the statement rather than the server keeps the cost with the queries that
+// need it, but it is charged per statement against a pool of ten, so the default is sized
+// for a host with a gigabyte or two to spare rather than for the best number here: 32MB
+// already recovers most of the speed and 64MB all of it, for every statistic except the
+// best-competition-per-competitor one, whose intermediate needs nearer 256MB to stay in
+// memory. That one is worth about fifteen seconds unaided, and is cached per export.
+const MEGABYTE = 1048576;
+function temporaryTableBytes() {
   return (
     Math.max(
       16,
-      Math.min(4096, Number(process.env.STATISTICS_MEMORY_MB) || 256),
-    ) * 1048576
+      Math.min(1024, Number(process.env.STATISTICS_MEMORY_MB) || 64),
+    ) * MEGABYTE
   );
 }
+// Fixed, and deliberately small. Sorting is not what these queries spill on, and a sort
+// buffer above a couple of megabytes is slower rather than faster — Linux allocates it per
+// sort and crosses a threshold that outweighs the larger buffer. Measured here, 2MB beat
+// 64MB on every statistic; on a small host the larger buffer only invites swapping.
+const SORT_BUFFER = 2 * MEGABYTE;
+const JOIN_BUFFER = 4 * MEGABYTE;
 function statisticsStatement(sql: string) {
-  const memory = statementMemory();
-  return `SET STATEMENT max_statement_time=${statementTimeout()}, tmp_table_size=${memory}, max_heap_table_size=${memory}, sort_buffer_size=${Math.floor(memory / 4)}, join_buffer_size=${Math.floor(memory / 16)} FOR ${sql}`;
+  const temporaryTable = temporaryTableBytes();
+  return `SET STATEMENT max_statement_time=${statementTimeout()}, tmp_table_size=${temporaryTable}, max_heap_table_size=${temporaryTable}, sort_buffer_size=${SORT_BUFFER}, join_buffer_size=${JOIN_BUFFER} FOR ${sql}`;
 }
 export interface StatisticsOptions {
   statistics: typeof STATISTICS;
