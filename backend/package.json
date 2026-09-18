@@ -6,6 +6,7 @@
     "dev": "nodemon",
     "start": "node dist/index.js",
     "build": "tsc",
+    "test": "npm run build && node --test \"test/*.test.cjs\"",
     "test:statistics": "npm run build && node --test test/statistics.test.cjs",
     "compute:best-ever-ranks": "node dist/compute_best_ever_ranks.js"
   },

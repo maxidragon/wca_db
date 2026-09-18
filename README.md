@@ -36,18 +36,26 @@ Attendance and solve statistics read `statistics_entries`, one row per competito
 
 Queries join `persons`, `countries` and `competitions` only where a filter or an output value reads them, and attach names after grouping rather than carrying them through it, so an unfiltered statistic aggregates rows from one table alone. Server memory is the remaining limit: the export is around 15 GB against MariaDB’s default 128 MB `innodb_buffer_pool_size`, so every statistic reads from disk. Raising the buffer pool to a few GB is the largest single improvement available and needs no change here.
 
+## Person
+
+The **Person** navigation tab (`/person`) takes a WCA ID and shows what one competitor’s results say about them: their personal bests with world, continental and national ranks; every competition they have results from; the competitors they have shared the most competitions with; their most visited venues and cities; every country they have competed in; and their competitions per year. Alongside those it counts competitions, countries, events, successful and attempted solves, finals medals, and records by scope.
+
+Medals count official finals whose single was successful, so a final nobody solved is not a podium; a round won before the final is not a medal either. Records count the world, continental and national markers on both the single and the average of a result. Venue names are the labels of the links the export stores, so the same hall groups together whatever the link says. Competitions are those with results — an upcoming registration is not one. Attendance shared with another competitor counts competitions, not results.
+
+The API exposes an authenticated `GET /api/person?wca_id=…`, which answers the whole page in one response: an unknown ID returns 404, a malformed one 400. It reads `statistics_entries` for attendance and solves, so it returns 503 naming the script to run until that table exists. The heaviest competitor in the export, with more than four hundred competitions, costs a few hundred milliseconds: every query is keyed by the competitor, and the shared-competition count reads the entry table competition-first, which its primary key orders.
+
 ## Development and validation
 
 Install dependencies in both directories with `npm ci`. Configure `backend/.env` using `backend/.env.example`, import WCA data with `backend/update_database.sh`, and run `npm run dev` in each directory. The import builds `statistics_entries` itself; an existing database needs `backend/compute_statistics_entries.sh` once, which takes a few minutes.
 
 Build both packages with `npm run build` from their respective directories. Frontend lint runs with `npm run lint`.
 
-Run statistics tests from `backend/`:
+Run the tests from `backend/`:
 
 ```sh
-npm run test:statistics
+npm test               # every test file; npm run test:statistics runs the statistics ones alone
 # Run the MariaDB integration tests using an explicitly selected test server:
-TEST_DB_SOCKET=/path/to/test-mariadb.sock npm run test:statistics
+TEST_DB_SOCKET=/path/to/test-mariadb.sock npm test
 ```
 
-Without `TEST_DB_SOCKET`, filter-validation and cache-behavior tests run and database integration tests are skipped. Integration tests create a uniquely named fixture database on the supplied socket using its local root account, exercise every statistic and filter combination, check calculations and pagination, and drop only that fixture database afterward. They never load the project’s `.env` or use its production connection settings.
+Without `TEST_DB_SOCKET`, filter-validation and cache-behavior tests run and database integration tests are skipped; the person tests are integration tests throughout. Integration tests create a uniquely named fixture database on the supplied socket using its local root account, exercise every statistic and filter combination, check calculations and pagination, and drop only that fixture database afterward. They never load the project’s `.env` or use its production connection settings.

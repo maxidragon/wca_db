@@ -9,6 +9,7 @@ import { loginWithWca, ensureAuthenticated } from "./wca_oauth";
 import { getChain, competitionsTogether } from "./relations";
 import { getCompetitionAchievements, searchCompetitions } from "./achievements";
 import { bestEverRanksReady, getBestEverRanks } from "./best_ever_ranks";
+import { getPersonProfile } from "./person";
 import {
   createStatisticsService,
   StatisticsInputError,
@@ -306,6 +307,33 @@ app.get("/api/best-ever-ranks", ensureAuthenticated, async (req: Request, res: R
       return res.status(404).json({ error: "WCA ID not found" });
     }
     res.json(ranks);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/person", ensureAuthenticated, async (req: Request, res: Response) => {
+  const wca_id = ((req.query.wca_id as string) || "").trim().toUpperCase();
+
+  if (!wca_id) {
+    return res.status(400).json({ error: "wca_id is required" });
+  }
+  if (!WCA_ID_RE.test(wca_id)) {
+    return res.status(400).json({ error: "Invalid WCA ID format (expected e.g. 2009ZEMD01)" });
+  }
+
+  if (!(await statisticsEntriesReady(pool))) {
+    return res.status(503).json({
+      error: "Statistics entries not yet computed. Run backend/compute_statistics_entries.sh.",
+    });
+  }
+
+  try {
+    const profile = await getPersonProfile(pool, wca_id);
+    if (!profile) {
+      return res.status(404).json({ error: "WCA ID not found" });
+    }
+    res.json(profile);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

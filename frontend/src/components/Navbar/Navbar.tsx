@@ -13,6 +13,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Competitions Together", to: "/competitions-together" },
   { label: "Achievements", to: "/achievements" },
   { label: "Best Ever Ranks", to: "/best-ever-ranks" },
+  { label: "Person", to: "/person" },
   { label: "Statistics", to: "/statistics" },
 ];
 
