@@ -9,7 +9,11 @@ import { loginWithWca, ensureAuthenticated } from "./wca_oauth";
 import { getChain, competitionsTogether } from "./relations";
 import { getCompetitionAchievements, searchCompetitions } from "./achievements";
 import { bestEverRanksReady, getBestEverRanks } from "./best_ever_ranks";
-import { createStatisticsService, StatisticsInputError } from "./statistics";
+import {
+  createStatisticsService,
+  StatisticsInputError,
+  statisticsEntriesReady,
+} from "./statistics";
 
 const PORT = process.env.PORT || 3001;
 
@@ -50,6 +54,11 @@ app.get("/api/statistics/options", ensureAuthenticated, async (_req: Request, re
 });
 
 app.get("/api/statistics", ensureAuthenticated, async (req: Request, res: Response) => {
+  if (!(await statisticsEntriesReady(pool))) {
+    return res.status(503).json({
+      error: "Statistics entries not yet computed. Run backend/compute_statistics_entries.sh.",
+    });
+  }
   try {
     res.json(await statisticsService.get(req.query));
   } catch (err: unknown) {

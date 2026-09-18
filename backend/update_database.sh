@@ -119,6 +119,11 @@ INSERT INTO wca_statistics_metadata (field, value)
   VALUES ('export_timestamp', '$EXPORT_TIMESTAMP');
 EOF
 
+# Into the staging database, so it is swapped in with the export it was built from and the
+# statistics are never left pointing at entries computed from a previous one.
+step "Computing statistics entries"
+db "$NEW_DB_NAME" < "$SCRIPT_DIR/statistics_entries.sql"
+
 step "Swapping the new database in"
 # CREATE IF NOT EXISTS so a first ever run, with no live database to swap out, works too.
 db -e "CREATE DATABASE IF NOT EXISTS $DB_NAME;

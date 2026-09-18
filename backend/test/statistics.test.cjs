@@ -4,10 +4,30 @@ const mysql = require("mysql2/promise");
 const { STATISTICS } = require("../dist/statistics_catalog");
 const {
   parseStatisticsFilters,
+  buildStatisticsQuery,
   getStatisticsOptions,
   getStatistics,
   createStatisticsService,
+  statisticsEntriesReady,
 } = require("../dist/statistics");
+const { readFileSync } = require("node:fs");
+const path = require("node:path");
+// The fixture builds the entry table exactly as an import does, so these tests exercise the
+// statements that actually ship rather than a restatement of them.
+const buildStatisticsEntries = async (target) => {
+  const file = readFileSync(
+    path.join(__dirname, "..", "statistics_entries.sql"),
+    "utf8",
+  );
+  for (const statement of file
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("--"))
+    .join("\n")
+    .split(";")
+    .map((part) => part.trim())
+    .filter(Boolean))
+    await target.query(statement);
+};
 const fixtureOptions = {
   statistics: STATISTICS,
   regions: [
@@ -56,6 +76,65 @@ test("rejects invalid, repeated and unsupported filters, including SQL injection
   ])
     assert.throws(() => parse(q));
 });
+test("the aggregation joins only the tables a filter or an output value reads", () => {
+  const build = (query) =>
+    buildStatisticsQuery(
+      parseStatisticsFilters(query, fixtureOptions),
+      fixtureOptions,
+    ).sql;
+  // Everything between the table a statistic is driven from and its grouping: what each row
+  // is joined to. Names are attached after the grouping instead, so they must not be here.
+  const scan = (sql) =>
+    sql.slice(
+      Math.max(
+        sql.indexOf("FROM results r"),
+        sql.indexOf("FROM statistics_entries e"),
+      ),
+      sql.indexOf("GROUP BY"),
+    );
+  const attendance = build({ statistic: "most-competitions" });
+  assert.match(attendance, /FROM statistics_entries e/);
+  assert.ok(
+    !attendance.includes("result_attempts"),
+    "a statistic served by the entry table should not read attempts",
+  );
+  for (const table of ["persons", "countries", "competitions"])
+    assert.ok(
+      !scan(attendance).includes(`JOIN ${table}`),
+      `unfiltered attendance should not join ${table} per entry row`,
+    );
+  assert.match(attendance, /JOIN persons p ON p\.wca_id=s\.person_id/);
+  assert.match(attendance, /JOIN countries pc ON pc\.id=p\.country_id/);
+  // Statistics that need a result column the entries do not carry still read results.
+  assert.match(build({ statistic: "medal-collection" }), /FROM results r/);
+  for (const table of ["persons", "countries", "competitions"])
+    assert.ok(
+      !scan(build({ statistic: "medal-collection" })).includes(`JOIN ${table}`),
+      `unfiltered medals should not join ${table} per result row`,
+    );
+  // A filter that needs a table still joins it before the grouping, on either source.
+  assert.match(
+    scan(build({ statistic: "most-competitions", gender: "f" })),
+    /JOIN persons p ON p\.wca_id=e\.person_id/,
+  );
+  assert.match(
+    scan(build({ statistic: "most-competitions", year: "2025" })),
+    /JOIN competitions c ON c\.id=e\.competition_id/,
+  );
+  assert.match(
+    scan(build({ statistic: "most-competitions", region: "China" })),
+    /JOIN countries rc ON rc\.id=e\.country_id/,
+  );
+  assert.match(
+    scan(build({ statistic: "medal-collection", region: "China" })),
+    /JOIN countries pc/,
+  );
+  assert.match(
+    scan(build({ statistic: "most-persons", region: "China" })),
+    /JOIN countries cc/,
+  );
+});
+
 const socket = process.env.TEST_DB_SOCKET;
 let admin, pool, options;
 const database = `wca_statistics_test_${process.pid}`;
@@ -223,6 +302,7 @@ before(async () => {
     await pool.query(
       `INSERT INTO ranks_${type} SELECT person_id,event_id,best,RANK() OVER(PARTITION BY event_id ORDER BY best),RANK() OVER(PARTITION BY event_id,continent_id ORDER BY best),RANK() OVER(PARTITION BY event_id,country_id ORDER BY best) FROM (SELECT r.person_id,r.event_id,MIN(r.${column}) AS best,p.country_id,c.continent_id FROM results r JOIN persons p ON p.wca_id=r.person_id AND p.sub_id=1 JOIN countries c ON c.id=p.country_id WHERE r.${column}>0 GROUP BY r.person_id,r.event_id,p.country_id,c.continent_id) pb`,
     );
+  await buildStatisticsEntries(pool);
   options = await getStatisticsOptions(pool);
 });
 after(async () => {
@@ -233,6 +313,66 @@ after(async () => {
   }
 });
 const integration = (name, fn) => test(name, { skip: !socket }, fn);
+integration(
+  "entries reproduce the results they summarise, and their absence is reported",
+  async () => {
+    const [entries] = await pool.query(
+      "SELECT competition_id, person_id, event_id, country_id, solves, attempts FROM statistics_entries ORDER BY competition_id, person_id, event_id, country_id",
+    );
+    const [live] = await pool.query(
+      `SELECT r.competition_id, r.person_id, r.event_id, r.country_id,
+              SUM(CASE WHEN a.value>0 THEN 1 ELSE 0 END) AS solves,
+              SUM(CASE WHEN a.value<>0 THEN 1 ELSE 0 END) AS attempts
+       FROM results r LEFT JOIN result_attempts a ON a.result_id=r.id
+       GROUP BY r.competition_id, r.person_id, r.event_id, r.country_id
+       ORDER BY r.competition_id, r.person_id, r.event_id, r.country_id`,
+    );
+    assert.ok(entries.length > 0);
+    assert.deepEqual(
+      entries.map((e) => ({
+        ...e,
+        solves: Number(e.solves),
+        attempts: Number(e.attempts),
+      })),
+      live.map((e) => ({
+        ...e,
+        solves: Number(e.solves),
+        attempts: Number(e.attempts),
+      })),
+    );
+    // A result with no attempt rows is still attendance, so it must survive the summary.
+    await pool.query(
+      "INSERT INTO results VALUES (9001,'2025AAAA01','China','China2026','222','f',1,100,-1,'','')",
+    );
+    try {
+      await buildStatisticsEntries(pool);
+      const [[attendance]] = await pool.query(
+        "SELECT solves, attempts FROM statistics_entries WHERE competition_id='China2026' AND person_id='2025AAAA01' AND event_id='222'",
+      );
+      assert.deepEqual(
+        {
+          solves: Number(attendance.solves),
+          attempts: Number(attendance.attempts),
+        },
+        { solves: 0, attempts: 0 },
+      );
+    } finally {
+      await pool.query("DELETE FROM results WHERE id=9001");
+      await buildStatisticsEntries(pool);
+    }
+    assert.equal(await statisticsEntriesReady(pool), true);
+    await pool.query(
+      "RENAME TABLE statistics_entries TO statistics_entries_absent",
+    );
+    try {
+      assert.equal(await statisticsEntriesReady(pool), false);
+    } finally {
+      await pool.query(
+        "RENAME TABLE statistics_entries_absent TO statistics_entries",
+      );
+    }
+  },
+);
 const run = (q) =>
   getStatistics(pool, parseStatisticsFilters(q, options), options);
 integration(
