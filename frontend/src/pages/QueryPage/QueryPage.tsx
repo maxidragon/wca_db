@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { backendRequest } from "../../utils/request";
-import { Editor, useMonaco } from "@monaco-editor/react";
+import { Editor, useMonaco, type Monaco } from "@monaco-editor/react";
 import { getSchema } from "../../utils/utils";
 import { VscAdd, VscChromeClose } from "react-icons/vsc";
 import toast from "react-hot-toast";
@@ -11,6 +11,18 @@ interface QueryPageProps {
   token: string | null;
 }
 
+/** A row of whatever the user's own SELECT returned: its columns are known only at runtime. */
+export type QueryResultRow = Record<string, unknown>;
+
+// Taken from the provider monaco itself expects, so the suggestions this page builds cannot
+// drift from what it accepts.
+type CompletionProvider = Parameters<
+  Monaco["languages"]["registerCompletionItemProvider"]
+>[1];
+type Suggestion = NonNullable<
+  Awaited<ReturnType<NonNullable<CompletionProvider["provideCompletionItems"]>>>
+>["suggestions"][number];
+
 interface SavedQuery {
   name: string;
   query: string;
@@ -20,7 +32,7 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
   const monaco = useMonaco();
   const [defaultQueryValue, setDefaultQueryValue] = useState<string>("");
   const [query, setQuery] = useState<string>(defaultQueryValue);
-  const [results, setResults] = useState<any[]>([]);
+  const [results, setResults] = useState<QueryResultRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
@@ -58,7 +70,7 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
     if (!monaco) return;
     const addSuggestions = async () => {
       const response = await getSchema();
-      if (response.status === 200) {
+      if (response.status === 200 && response.data) {
         const schemaData = response.data;
 
         monaco.languages.registerCompletionItemProvider("sql", {
@@ -71,7 +83,15 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
               endColumn: position.column,
             });
 
-            const suggestions: any[] = [];
+            const word = model.getWordUntilPosition(position);
+            const range = {
+              startLineNumber: position.lineNumber,
+              endLineNumber: position.lineNumber,
+              startColumn: word.startColumn,
+              endColumn: word.endColumn,
+            };
+
+            const suggestions: Suggestion[] = [];
             const keywords = [
               "SELECT",
               "FROM",
@@ -95,6 +115,7 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
                 label: kw,
                 kind: monaco.languages.CompletionItemKind.Keyword,
                 insertText: kw,
+                range,
               })
             );
 
@@ -107,12 +128,13 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
             const tableDotMatch = lastToken.match(/^(\w+)\.$/);
 
             if (tableDotMatch && schemaData[tableDotMatch[1]]) {
-              schemaData[tableDotMatch[1]].columns.forEach((col: any) => {
+              schemaData[tableDotMatch[1]].columns.forEach((col) => {
                 suggestions.push({
                   label: col.name,
                   kind: monaco.languages.CompletionItemKind.Field,
                   insertText: col.name,
                   detail: col.type,
+                  range,
                 });
               });
               return { suggestions };
@@ -128,12 +150,13 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
             ) {
               usedTables.forEach((t) => {
                 if (schemaData[t]) {
-                  schemaData[t].columns.forEach((col: any) => {
+                  schemaData[t].columns.forEach((col) => {
                     suggestions.push({
                       label: col.name,
                       kind: monaco.languages.CompletionItemKind.Field,
                       insertText: col.name,
                       detail: `${t}.${col.name}`,
+                      range,
                     });
                   });
                 }
@@ -147,12 +170,13 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
             ) {
               usedTables.forEach((t) => {
                 if (schemaData[t]) {
-                  schemaData[t].columns.forEach((col: any) => {
+                  schemaData[t].columns.forEach((col) => {
                     suggestions.push({
                       label: col.name,
                       kind: monaco.languages.CompletionItemKind.Field,
                       insertText: col.name,
                       detail: `${t}.${col.name}`,
+                      range,
                     });
                   });
                 }
@@ -166,6 +190,7 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
                   kind: monaco.languages.CompletionItemKind.Class,
                   insertText: table,
                   detail: "table",
+                  range,
                 });
               });
             }
@@ -175,13 +200,14 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
               lastToken === "," ||
               selectContext
             ) {
-              Object.values(schemaData).forEach((table: any) => {
-                table.columns.forEach((col: any) => {
+              Object.entries(schemaData).forEach(([tableName, table]) => {
+                table.columns.forEach((col) => {
                   suggestions.push({
                     label: col.name,
                     kind: monaco.languages.CompletionItemKind.Field,
                     insertText: col.name,
-                    detail: `${col.name} (${table.name || "table"})`,
+                    detail: `${col.name} (${tableName})`,
+                    range,
                   });
                 });
               });
@@ -276,8 +302,8 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
         setPageSize(data.pageSize || pageSize);
         setTotal(data.total || 0);
       }
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not run the query");
       setResults([]);
     } finally {
       setIsLoading(false);
@@ -452,7 +478,7 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
                       key={col}
                       className="border px-3 py-2 whitespace-pre-wrap"
                     >
-                      {row[col] !== null ? row[col].toString() : " "}
+                      {row[col] == null ? " " : String(row[col])}
                     </td>
                   ))}
                 </tr>
