@@ -1,4 +1,5 @@
 import { BiTrash, BiShareAlt } from "react-icons/bi";
+import type { QueryResultRow } from "../QueryPage";
 
 interface ActionButtonsProps {
   token: string | null;
@@ -7,11 +8,11 @@ interface ActionButtonsProps {
   pageSize: number;
   total: number;
   setQuery: (query: string) => void;
-  setResults: (results: any[]) => void;
+  setResults: (results: QueryResultRow[]) => void;
   setError: (error: string | null) => void;
   setPage: (page: number) => void;
   setTotal: (total: number) => void;
-  setParamValues: (params: Record<string, any>) => void;
+  setParamValues: (params: Record<string, string>) => void;
   handleExecute: (page: number) => void;
   handleShare: () => void;
 }

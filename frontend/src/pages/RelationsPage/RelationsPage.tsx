@@ -55,8 +55,10 @@ const RelationsPage = () => {
       } else {
         setResult(data);
       }
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Could not load the relation",
+      );
     } finally {
       setIsLoading(false);
     }

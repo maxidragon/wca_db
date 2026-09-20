@@ -1,10 +1,17 @@
 import { backendRequest, TOKEN_NAME, USER_INFO_NAME } from "./request";
 
+export interface WcaUserInfo {
+  wcaUserId: number;
+  username: string;
+  avatarUrl?: string;
+  roles: string[];
+}
+
 interface WcaLoginResponse {
   status: number;
   data: {
     token: string;
-    userInfo: any;
+    userInfo: WcaUserInfo;
     message?: string;
   };
 }

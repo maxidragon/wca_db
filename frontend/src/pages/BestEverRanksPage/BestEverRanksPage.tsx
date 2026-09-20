@@ -68,8 +68,10 @@ const BestEverRanksPage = () => {
       } else {
         setResult(data);
       }
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Could not load the ranks",
+      );
     } finally {
       setIsLoading(false);
     }

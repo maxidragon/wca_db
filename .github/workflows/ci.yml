@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+# A branch only needs its latest commit checked; an older run of the same branch is already
+# answering a question nobody is asking any more.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend build and tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      # The integration tests create and drop their own fixture database on whatever server
+      # TEST_DB_SOCKET names, and refuse to read the project's .env, so they need a server of
+      # their own rather than any server the job can reach. Root gets a password login
+      # because the tests connect as root while the job itself runs as the runner user, whom
+      # MariaDB's default socket authentication would reject.
+      - name: Install MariaDB
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mariadb-server
+          sudo systemctl start mariadb
+          sudo mariadb -e "ALTER USER 'root'@'localhost' IDENTIFIED VIA unix_socket OR mysql_native_password USING PASSWORD('')"
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: ./backend
+
+      # Builds the backend first: the tests run against the compiled output.
+      - name: Run tests
+        run: npm test
+        working-directory: ./backend
+        env:
+          TEST_DB_SOCKET: /run/mysqld/mysqld.sock
+
+  frontend:
+    name: Frontend lint and build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: ./frontend
+
+      - name: Lint
+        run: npm run lint
+        working-directory: ./frontend
+
+      - name: Build
+        run: npm run build
+        working-directory: ./frontend
