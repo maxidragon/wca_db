@@ -52,7 +52,8 @@ export async function getBestEverRanks(pool: Pool, wcaId: string) {
      ORDER BY e.rank,
               ber.result_type DESC,
               FIELD(ber.region_type, 'world', 'continent', 'country'),
-              ber.best_rank`,
+              ber.best_rank,
+              ber.start_date`,
     [wcaId]
   );
 

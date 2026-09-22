@@ -151,7 +151,7 @@ const BestEverRanksPage = () => {
                     <tbody className="divide-y divide-gray-100">
                       {event.ranks.map((rank) => (
                         <tr
-                          key={`${rank.result_type}-${rank.region_type}-${rank.region_id}`}
+                          key={`${rank.result_type}-${rank.region_type}-${rank.region_id}-${rank.start_date}`}
                           className="hover:bg-gray-50 transition-colors"
                         >
                           <td className="px-4 py-2 capitalize text-gray-600">

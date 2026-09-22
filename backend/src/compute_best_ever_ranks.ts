@@ -16,6 +16,9 @@ import mysql, { Connection, RowDataPacket } from "mysql2";
  * O(log n). A second Fenwick tree per region tracks the competitors who are currently
  * holding their best ever rank, so we can find out on which day they lost it.
  *
+ * Reaching the same best rank again with a better result does not replace the earlier
+ * result: every result the best rank was held with is kept, each with its own period.
+ *
  * Days are the finest granularity the export gives us (competition start dates), so all
  * results of a day are applied before anybody is ranked, matching the behaviour of the
  * official statistic.
@@ -138,6 +141,11 @@ class Scope {
   readonly ranks: Int32Array[] = [];
   readonly reigns: Int32Array[] = [];
   readonly buckets = new Map<number, number[]>();
+  /**
+   * Earlier periods of the current best rank, held with a worse result than the one in
+   * the slot, flattened as [value index + 1, competition + 1, start day, end day].
+   */
+  readonly earlierPeriods = new Map<number, number[]>();
   readonly pendingValue = new Map<number, number>();
   readonly pendingCompetition = new Map<number, number>();
 
@@ -295,7 +303,7 @@ export async function computeBestEverRanks(connection: Connection): Promise<numb
        competition_id VARCHAR(32) NOT NULL,
        start_date DATE NOT NULL,
        end_date DATE NULL,
-       PRIMARY KEY (person_id, event_id, result_type, region_type, region_id)
+       PRIMARY KEY (person_id, event_id, result_type, region_type, region_id, start_date)
      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
   );
 
@@ -363,17 +371,28 @@ export async function computeBestEverRanks(connection: Connection): Promise<numb
           const rank = (valueIdx === 0 ? 0 : fenwickPrefix(tree, valueIdx - 1)) + 1;
 
           if (slots.bestRank[slot] === 0 || rank < slots.bestRank[slot]) {
-            slots.bestRank[slot] = rank;
-            slots.bestValue[slot] = valueIdx + 1;
-            slots.bestCompetition[slot] = slots.currentCompetition[slot];
-            slots.bestStart[slot] = day;
-            slots.bestEnd[slot] = 0;
-            scope.addReign(region, slot, valueIdx);
-          } else if (slots.bestEnd[slot] === 0) {
-            // Still holding the same rank, now with a better result.
-            if (rank === slots.bestRank[slot]) scope.addReign(region, slot, valueIdx);
-            else slots.bestEnd[slot] = day - 1;
+            scope.earlierPeriods.delete(slot);
+          } else if (rank === slots.bestRank[slot]) {
+            // Same best rank with a better result: keep the previous period next to it.
+            const period = [
+              slots.bestValue[slot],
+              slots.bestCompetition[slot],
+              slots.bestStart[slot],
+              slots.bestEnd[slot] === 0 ? day - 1 : slots.bestEnd[slot],
+            ];
+            const earlier = scope.earlierPeriods.get(slot);
+            if (earlier) earlier.push(...period);
+            else scope.earlierPeriods.set(slot, period);
+          } else {
+            if (slots.bestEnd[slot] === 0) slots.bestEnd[slot] = day - 1;
+            continue;
           }
+          slots.bestRank[slot] = rank;
+          slots.bestValue[slot] = valueIdx + 1;
+          slots.bestCompetition[slot] = slots.currentCompetition[slot];
+          slots.bestStart[slot] = day;
+          slots.bestEnd[slot] = 0;
+          scope.addReign(region, slot, valueIdx);
         }
 
         scope.pendingValue.clear();
@@ -439,19 +458,28 @@ export async function computeBestEverRanks(connection: Connection): Promise<numb
       for (let slot = 0; slot < slots.size; slot++) {
         if (slots.bestRank[slot] === 0) continue;
         const region = slots.region[slot];
-        rows.push([
-          personIds[slots.person[slot]],
-          eventId,
-          scope.type,
-          regionType(region),
-          regionId(region),
-          slots.bestRank[slot],
-          scope.values[slots.bestValue[slot] - 1],
-          competitionIds[slots.bestCompetition[slot] - 1],
-          fromEpochDay(slots.bestStart[slot]),
-          slots.bestEnd[slot] === 0 ? null : fromEpochDay(slots.bestEnd[slot]),
-        ]);
-        if (rows.length === INSERT_CHUNK) {
+        const periods = [
+          ...(scope.earlierPeriods.get(slot) ?? []),
+          slots.bestValue[slot],
+          slots.bestCompetition[slot],
+          slots.bestStart[slot],
+          slots.bestEnd[slot],
+        ];
+        for (let i = 0; i < periods.length; i += 4) {
+          rows.push([
+            personIds[slots.person[slot]],
+            eventId,
+            scope.type,
+            regionType(region),
+            regionId(region),
+            slots.bestRank[slot],
+            scope.values[periods[i] - 1],
+            competitionIds[periods[i + 1] - 1],
+            fromEpochDay(periods[i + 2]),
+            periods[i + 3] === 0 ? null : fromEpochDay(periods[i + 3]),
+          ]);
+        }
+        if (rows.length >= INSERT_CHUNK) {
           await query(connection, `INSERT INTO ${BUILD_TABLE} VALUES ?`, [rows]);
           written += rows.length;
           rows = [];
