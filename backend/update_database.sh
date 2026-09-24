@@ -199,6 +199,7 @@ fi
 
 step "Building indexes"
 { echo "SET FOREIGN_KEY_CHECKS = 0;"; cat "$INDEX_PATH"; } | db "$NEW_DB_NAME"
+db "$NEW_DB_NAME" < "$SCRIPT_DIR/rank_indexes.sql"
 
 db "$NEW_DB_NAME" <<EOF
 CREATE TABLE IF NOT EXISTS wca_statistics_metadata (
