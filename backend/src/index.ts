@@ -10,6 +10,7 @@ import { getChain, competitionsTogether } from "./relations";
 import { getCompetitionAchievements, searchCompetitions } from "./achievements";
 import { bestEverRanksReady, getBestEverRanks } from "./best_ever_ranks";
 import { getPersonProfile } from "./person";
+import { getNemeses, NEMESIS_REGIONS, type NemesisRegion } from "./nemeses";
 import {
   createStatisticsService,
   StatisticsInputError,
@@ -336,6 +337,39 @@ app.get("/api/person", ensureAuthenticated, async (req: Request, res: Response) 
     res.json(profile);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/nemeses", ensureAuthenticated, async (req: Request, res: Response) => {
+  const wca_id = ((req.query.wca_id as string) || "").trim().toUpperCase();
+  const region = (req.query.region as string) || "world";
+  const page = req.query.page === undefined ? 1 : Number(req.query.page);
+
+  if (!wca_id) {
+    return res.status(400).json({ error: "wca_id is required" });
+  }
+  if (!WCA_ID_RE.test(wca_id)) {
+    return res.status(400).json({ error: "Invalid WCA ID format (expected e.g. 2009ZEMD01)" });
+  }
+  if (!NEMESIS_REGIONS.includes(region as NemesisRegion)) {
+    return res.status(400).json({ error: "region must be one of world, continent, country" });
+  }
+  if (!Number.isInteger(page) || page < 1) {
+    return res.status(400).json({ error: "page must be a positive integer" });
+  }
+
+  try {
+    const nemeses = await getNemeses(pool, wca_id, region as NemesisRegion, page);
+    if (!nemeses) {
+      return res.status(404).json({ error: "WCA ID not found" });
+    }
+    res.json(nemeses);
+  } catch (err: unknown) {
+    if (isQueryTimeout(err)) {
+      return res.status(408).json({ error: "Nemeses took too long to compute. Please try again later." });
+    }
+    console.error("Nemeses query failed", err);
+    res.status(500).json({ error: "Could not load the nemeses" });
   }
 });
 

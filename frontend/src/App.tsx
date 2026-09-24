@@ -8,6 +8,7 @@ import AchievementsPage from "./pages/AchievementsPage/AchievementsPage";
 import BestEverRanksPage from "./pages/BestEverRanksPage/BestEverRanksPage";
 import StatisticsPage from "./pages/StatisticsPage/StatisticsPage";
 import PersonPage from "./pages/PersonPage/PersonPage";
+import NemesesPage from "./pages/NemesesPage/NemesesPage";
 import Navbar, { type NavbarUserInfo } from "./components/Navbar/Navbar";
 import { FaGithub } from "react-icons/fa";
 import { getMetadata } from "./utils/utils";
@@ -153,6 +154,11 @@ function App() {
           <Route path="/person" element={(
             <ProtectedPage token={token} onLogin={handleWcaLogin}>
               <PersonPage />
+            </ProtectedPage>
+          )} />
+          <Route path="/nemeses" element={(
+            <ProtectedPage token={token} onLogin={handleWcaLogin}>
+              <NemesesPage />
             </ProtectedPage>
           )} />
           <Route path="/statistics" element={(

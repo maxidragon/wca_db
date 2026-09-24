@@ -38,6 +38,13 @@ jobs:
     - name: Ensure statistics entries exist
       run: ./compute_statistics_entries.sh --if-missing
       working-directory: ./backend
+    # The nemeses read the rank tables by event and rank. An import builds those indexes;
+    # this adds them to a database imported before they existed, in seconds, once.
+    - name: Ensure rank indexes exist
+      run: |
+        set -a; . ./.env; set +a
+        mariadb --user="${DB_USER:-root}" --password="${DB_PASS:-}" "${DB_NAME:-wca}" < rank_indexes.sql
+      working-directory: ./backend
     - name: Restart service
       run: pm2 restart wca-db-backend -s || pm2 start dist/index.js --name wca-db-backend -s
       working-directory: ./backend
