@@ -26,6 +26,9 @@ export interface PersonCompetition {
   country_id: string;
   country_name: string;
   events: number;
+  total_events: number;
+  rounds: number;
+  total_rounds: number;
   solves: number;
   attempts: number;
 }
@@ -97,6 +100,9 @@ interface CompetitionRow extends RowDataPacket {
   country_id: string;
   country_name: string;
   events: number;
+  total_events: number;
+  rounds: number;
+  total_rounds: number;
   solves: string;
   attempts: string;
 }
@@ -197,18 +203,30 @@ async function getPersonalBests(pool: Pool, wcaId: string): Promise<PersonalBest
 }
 
 async function getCompetitions(pool: Pool, wcaId: string): Promise<PersonCompetition[]> {
+  // Aggregate the person's solves before joining all results at their competitions.
+  // A round is an event/round-type pair, counted once regardless of entrant count.
   const [rows] = await pool.query<CompetitionRow[]>(
-    `SELECT c.id, c.name, DATE_FORMAT(c.start_date, '%Y-%m-%d') AS start_date,
+    `WITH mine AS (
+       SELECT competition_id, COUNT(DISTINCT event_id) AS events,
+              SUM(solves) AS solves, SUM(attempts) AS attempts
+       FROM statistics_entries
+       WHERE person_id = ?
+       GROUP BY competition_id
+     )
+     SELECT c.id, c.name, DATE_FORMAT(c.start_date, '%Y-%m-%d') AS start_date,
             c.city_name, c.venue, c.country_id, co.name AS country_name,
-            COUNT(DISTINCT e.event_id) AS events,
-            SUM(e.solves) AS solves, SUM(e.attempts) AS attempts
-     FROM statistics_entries e
+            e.events, e.solves, e.attempts,
+            COUNT(DISTINCT r.event_id) AS total_events,
+            COUNT(DISTINCT CASE WHEN r.person_id = ? THEN r.event_id END,
+                           r.round_type_id) AS rounds,
+            COUNT(DISTINCT r.event_id, r.round_type_id) AS total_rounds
+     FROM mine e
      JOIN competitions c ON c.id = e.competition_id
      JOIN countries co ON co.id = c.country_id
-     WHERE e.person_id = ?
+     JOIN results r ON r.competition_id = c.id
      GROUP BY c.id
      ORDER BY c.start_date DESC, c.id`,
-    [wcaId],
+    [wcaId, wcaId],
   );
   return rows.map((row) => ({
     id: row.id,
@@ -219,6 +237,9 @@ async function getCompetitions(pool: Pool, wcaId: string): Promise<PersonCompeti
     country_id: row.country_id,
     country_name: row.country_name,
     events: Number(row.events),
+    total_events: Number(row.total_events),
+    rounds: Number(row.rounds),
+    total_rounds: Number(row.total_rounds),
     solves: Number(row.solves),
     attempts: Number(row.attempts),
   }));

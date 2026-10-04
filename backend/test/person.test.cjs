@@ -120,6 +120,10 @@ before(async () => {
   // Bob shares three competitions with Alice, Cara and Dan one each.
   for (const competition of ["Warsaw2025", "Warsaw2026", "Krakow2026"])
     await add("2025BBBB01", competition, "333", { pos: 5 });
+  // Rounds and events Alice did not enter still count toward competition totals.
+  await add("2025BBBB01", "Warsaw2026", "333", { round: "2", pos: 5 });
+  await add("2025BBBB01", "Warsaw2026", "222", { round: "1", pos: 5 });
+  await add("2025BBBB01", "Warsaw2026", "222", { pos: 5 });
   await add("2025CCCC01", "Warsaw2025", "333", { pos: 6 });
   await add("2025DDDD01", "Beijing2026", "222", { pos: 7, country: "China" });
 
@@ -206,6 +210,23 @@ integration("totals count attendance, solves, medals and records", async () => {
     continental_records: 1,
     national_records: 1,
   });
+});
+
+integration("events and rounds distinguish personal participation from competition totals", async () => {
+  const { competitions } = await getPersonProfile(pool, "2025AAAA01");
+  assert.deepEqual(
+    competitions.map(({ id, events, total_events, rounds, total_rounds }) => ({
+      id, events, total_events, rounds, total_rounds,
+    })),
+    [
+      // An all-DNF round still counts as participation; different events' finals
+      // are separate rounds even though they share the same round type.
+      { id: "Beijing2026", events: 1, total_events: 2, rounds: 1, total_rounds: 2 },
+      { id: "Krakow2026", events: 1, total_events: 1, rounds: 1, total_rounds: 1 },
+      { id: "Warsaw2026", events: 1, total_events: 2, rounds: 2, total_rounds: 5 },
+      { id: "Warsaw2025", events: 2, total_events: 2, rounds: 2, total_rounds: 2 },
+    ],
+  );
 });
 
 integration(

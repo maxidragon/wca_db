@@ -289,6 +289,9 @@ export default function PersonProfileView({ profile }: { profile: PersonProfile 
       </Card>
 
       <Card title={`All competitions (${profile.competitions.length})`}>
+        <p className="px-4 py-3 text-sm text-gray-500">
+          Events and rounds show competed in / total at the competition.
+        </p>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500">
@@ -307,6 +310,9 @@ export default function PersonProfileView({ profile }: { profile: PersonProfile 
                 </th>
                 <th scope="col" className="px-4 py-2 text-right">
                   Events
+                </th>
+                <th scope="col" className="px-4 py-2 text-right">
+                  Rounds
                 </th>
                 <th scope="col" className="px-4 py-2 text-right">
                   Solves
@@ -333,8 +339,11 @@ export default function PersonProfileView({ profile }: { profile: PersonProfile 
                   <td className="px-4 py-2 whitespace-nowrap text-gray-600">
                     {competition.city_name}, {competition.country_name}
                   </td>
-                  <td className="px-4 py-2 text-right text-gray-600">
-                    {competition.events}
+                  <td className="px-4 py-2 text-right whitespace-nowrap text-gray-600">
+                    {competition.events} / {competition.total_events}
+                  </td>
+                  <td className="px-4 py-2 text-right whitespace-nowrap text-gray-600">
+                    {competition.rounds} / {competition.total_rounds}
                   </td>
                   <td className="px-4 py-2 text-right whitespace-nowrap text-gray-600">
                     {competition.solves} / {competition.attempts}

@@ -21,6 +21,9 @@ export interface PersonCompetition {
   country_id: string;
   country_name: string;
   events: number;
+  total_events: number;
+  rounds: number;
+  total_rounds: number;
   solves: number;
   attempts: number;
 }
