@@ -3,7 +3,7 @@ export const USER_INFO_NAME = "wca_db_user";
 
 const BACKEND_ORIGIN = import.meta.env.PROD
   ? "/server"
-  : "http://localhost:3001";
+  : (import.meta.env.VITE_BACKEND_ORIGIN ?? "http://localhost:3001");
 
 export const backendRequest = async (
   path: string,
