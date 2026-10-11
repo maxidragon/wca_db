@@ -262,7 +262,8 @@ app.get("/api/competitions-together", ensureAuthenticated, async (req: Request, 
     }
 
     const [competitions] = await pool.query<RowDataPacket[]>(
-      `SELECT DISTINCT r1.competition_id AS id, c.name, c.start_date
+      `SELECT DISTINCT r1.competition_id AS id, c.name,
+              DATE_FORMAT(c.start_date, '%Y-%m-%d') AS start_date
        FROM results r1
        JOIN results r2 ON r1.competition_id = r2.competition_id
        JOIN competitions c ON r1.competition_id = c.id

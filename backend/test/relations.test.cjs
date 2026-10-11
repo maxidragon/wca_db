@@ -67,6 +67,11 @@ test(
   },
 );
 
+test("the start date is the calendar day the competition names", { skip: !socket }, async () => {
+  const [podium] = await podiumsTogether(pool, ANNA, BART);
+  assert.equal(podium.start_date, "2022-09-01");
+});
+
 test("positions follow the order the competitors are given in", { skip: !socket }, async () => {
   const podiums = await podiumsTogether(pool, BART, ANNA);
   assert.deepEqual(
