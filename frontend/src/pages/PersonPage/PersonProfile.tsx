@@ -117,7 +117,7 @@ export default function PersonProfileView({ profile }: { profile: PersonProfile 
         </p>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <StatTile
           label="Competitions"
           value={String(totals.competitions)}
@@ -142,6 +142,11 @@ export default function PersonProfileView({ profile }: { profile: PersonProfile 
           label="Medals"
           value={`${totals.gold} / ${totals.silver} / ${totals.bronze}`}
           hint="gold / silver / bronze"
+        />
+        <StatTile
+          label="Longest PR streak"
+          value={String(totals.longest_personal_record_streak)}
+          hint="competitions in a row with a PR"
         />
       </div>
 
@@ -290,7 +295,8 @@ export default function PersonProfileView({ profile }: { profile: PersonProfile 
 
       <Card title={`All competitions (${profile.competitions.length})`}>
         <p className="px-4 py-3 text-sm text-gray-500">
-          Events and rounds show competed in / total at the competition.
+          Events and rounds show competed in / total at the competition. PRs count each
+          event's single and average beaten at most once per competition.
         </p>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -316,6 +322,9 @@ export default function PersonProfileView({ profile }: { profile: PersonProfile 
                 </th>
                 <th scope="col" className="px-4 py-2 text-right">
                   Solves
+                </th>
+                <th scope="col" className="px-4 py-2 text-right">
+                  PRs
                 </th>
               </tr>
             </thead>
@@ -347,6 +356,9 @@ export default function PersonProfileView({ profile }: { profile: PersonProfile 
                   </td>
                   <td className="px-4 py-2 text-right whitespace-nowrap text-gray-600">
                     {competition.solves} / {competition.attempts}
+                  </td>
+                  <td className="px-4 py-2 text-right whitespace-nowrap text-gray-600">
+                    {competition.personal_records}
                   </td>
                 </tr>
               ))}

@@ -26,6 +26,7 @@ export interface PersonCompetition {
   total_rounds: number;
   solves: number;
   attempts: number;
+  personal_records: number;
 }
 
 export interface PersonProfile {
@@ -50,6 +51,7 @@ export interface PersonProfile {
     world_records: number;
     continental_records: number;
     national_records: number;
+    longest_personal_record_streak: number;
   };
   personal_bests: PersonalBest[];
   competitions: PersonCompetition[];

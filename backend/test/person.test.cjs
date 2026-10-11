@@ -53,12 +53,16 @@ before(async () => {
     "INSERT INTO events VALUES ('222','2x2x2 Cube',10),('333','3x3x3 Cube',20),('333bf','3x3x3 Blindfolded',30)",
     // Alice's second sub id carries the name and country she competed under before: the
     // profile must report the current ones.
-    "INSERT INTO persons VALUES ('2025AAAA01',1,'Alice','Poland'),('2025AAAA01',2,'Old Alice','China'),('2025BBBB01',1,'Bob','Poland'),('2025CCCC01',1,'Cara','Poland'),('2025DDDD01',1,'Dan','China')",
+    "INSERT INTO persons VALUES ('2025AAAA01',1,'Alice','Poland'),('2025AAAA01',2,'Old Alice','China'),('2025BBBB01',1,'Bob','Poland'),('2025CCCC01',1,'Cara','Poland'),('2025DDDD01',1,'Dan','China'),('2025EEEE01',1,'Eve','Poland')",
     `INSERT INTO competitions VALUES
        ('Warsaw2025','Warsaw Open 2025','Poland','Warsaw','[Cube Hall](https://example.test/hall)','2025-01-10','2025-01-10'),
        ('Warsaw2026','Warsaw Open 2026','Poland','Warsaw','[Cube Hall](https://example.test/hall)','2026-02-10','2026-02-10'),
        ('Krakow2026','Krakow Open 2026','Poland','Krakow','Sports Hall','2026-03-10','2026-03-10'),
-       ('Beijing2026','Beijing Open 2026','China','Beijing','Beijing Gym','2026-04-10','2026-04-10')`,
+       ('Beijing2026','Beijing Open 2026','China','Beijing','Beijing Gym','2026-04-10','2026-04-10'),
+       ('Gdansk2025','Gdansk Open 2025','Poland','Gdansk','Port Hall','2025-05-10','2025-05-10'),
+       ('Gdansk2026','Gdansk Open 2026','Poland','Gdansk','Port Hall','2026-05-10','2026-05-10'),
+       ('Poznan2026','Poznan Open 2026','Poland','Poznan','Fair Hall','2026-06-10','2026-06-10'),
+       ('Lodz2026','Lodz Open 2026','Poland','Lodz','City Hall','2026-07-10','2026-07-10')`,
     "INSERT INTO ranks_single VALUES ('2025AAAA01','333',500,10,5,1),('2025AAAA01','333bf',3000,20,9,2)",
     "INSERT INTO ranks_average VALUES ('2025AAAA01','333',700,12,6,2)",
   ])
@@ -126,6 +130,32 @@ before(async () => {
   await add("2025BBBB01", "Warsaw2026", "222", { pos: 5 });
   await add("2025CCCC01", "Warsaw2025", "333", { pos: 6 });
   await add("2025DDDD01", "Beijing2026", "222", { pos: 7, country: "China" });
+
+  // Eve competes alone, so her personal records leave Alice's profile untouched. Her first
+  // results are records, the final improving on them in the same competition included.
+  await add("2025EEEE01", "Gdansk2025", "333", {
+    round: "1",
+    values: [900, 1000, 1100, 1200, 1300],
+    average: 1100,
+  });
+  await add("2025EEEE01", "Gdansk2025", "333", {
+    values: [800, 1000, 1100, 1200, 1300],
+    average: 1000,
+  });
+  // A better single, an average no better than before.
+  await add("2025EEEE01", "Gdansk2026", "333", {
+    values: [700, 1000, 1100, 1200, 1300],
+    average: 1000,
+  });
+  // Nothing solved: no record, and the streak breaks.
+  await add("2025EEEE01", "Poznan2026", "333", {
+    values: [-1, -1, -1, -1, -1],
+    average: -1,
+  });
+  await add("2025EEEE01", "Lodz2026", "333", {
+    values: [600, 700, 800, 900, 1000],
+    average: 800,
+  });
 
   await buildStatisticsEntries(pool);
 });
@@ -209,8 +239,26 @@ integration("totals count attendance, solves, medals and records", async () => {
     world_records: 1,
     continental_records: 1,
     national_records: 1,
+    longest_personal_record_streak: 1,
   });
 });
+
+integration(
+  "personal records count per competition, and the streak runs over consecutive ones",
+  async () => {
+    const { competitions, totals } = await getPersonProfile(pool, "2025EEEE01");
+    assert.deepEqual(
+      competitions.map(({ id, personal_records }) => ({ id, personal_records })),
+      [
+        { id: "Lodz2026", personal_records: 2 },
+        { id: "Poznan2026", personal_records: 0 },
+        { id: "Gdansk2026", personal_records: 1 },
+        { id: "Gdansk2025", personal_records: 2 },
+      ],
+    );
+    assert.equal(totals.longest_personal_record_streak, 2);
+  },
+);
 
 integration("events and rounds distinguish personal participation from competition totals", async () => {
   const { competitions } = await getPersonProfile(pool, "2025AAAA01");
