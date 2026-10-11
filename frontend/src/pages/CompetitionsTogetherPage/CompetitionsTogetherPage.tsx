@@ -16,11 +16,25 @@ interface Competition {
   start_date: string | null;
 }
 
+interface Podium {
+  competition_id: string;
+  competition_name: string;
+  start_date: string | null;
+  event_id: string;
+  event_name: string;
+  pos1: number;
+  pos2: number;
+}
+
 interface Result {
   person1: Person;
   person2: Person;
   competitions: Competition[];
+  podiums: Podium[];
 }
+
+const TABS = ["competitions", "podiums"] as const;
+type Tab = (typeof TABS)[number];
 
 function formatDate(date: string | null): string {
   if (!date) return "";
@@ -39,6 +53,15 @@ const CompetitionsTogetherPage = () => {
   const [result, setResult] = useState<Result | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const tab: Tab = searchParams.get("tab") === "podiums" ? "podiums" : "competitions";
+
+  // The tab lives in the URL so a shared link opens on the list it names.
+  const selectTab = (next: Tab) => {
+    const params = new URLSearchParams(searchParams);
+    if (next === "competitions") params.delete("tab");
+    else params.set("tab", next);
+    setSearchParams(params, { replace: true });
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,7 +76,7 @@ const CompetitionsTogetherPage = () => {
     setIsLoading(true);
     setError(null);
     setResult(null);
-    setSearchParams({ wca_id1: v1, wca_id2: v2 });
+    setSearchParams({ wca_id1: v1, wca_id2: v2, ...(tab === "podiums" && { tab }) });
 
     try {
       const res = await backendRequest(
@@ -139,35 +162,123 @@ const CompetitionsTogetherPage = () => {
           {result.competitions.length === 0 ? (
             <p className="text-gray-600">These two competitors have never competed together.</p>
           ) : (
-            <div className="overflow-x-auto rounded-lg border border-gray-200">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 text-gray-500 uppercase text-xs">
-                  <tr>
-                    <th className="px-4 py-3 text-left">Competition</th>
-                    <th className="px-4 py-3 text-right whitespace-nowrap">Date</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {result.competitions.map((comp) => (
-                    <tr key={comp.id} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-4 py-3">
-                        <a
-                          href={`${WCA_ORIGIN}/competitions/${comp.id}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-blue-600 hover:underline"
-                        >
-                          {comp.name}
-                        </a>
-                      </td>
-                      <td className="px-4 py-3 text-right text-gray-500 whitespace-nowrap">
-                        {formatDate(comp.start_date)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <>
+              <div
+                role="tablist"
+                className="mb-6 inline-flex rounded-lg border border-gray-300 bg-white p-1 text-sm"
+              >
+                {TABS.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    role="tab"
+                    aria-selected={option === tab}
+                    onClick={() => selectTab(option)}
+                    className={`cursor-pointer rounded px-3 py-1.5 font-medium transition-colors ${
+                      option === tab
+                        ? "bg-blue-100 text-blue-700"
+                        : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                    }`}
+                  >
+                    {option === "competitions" ? "Competitions" : "Podiums"}
+                    <span className="ml-1.5 text-xs text-gray-500">
+                      {(option === "competitions"
+                        ? result.competitions.length
+                        : result.podiums.length
+                      ).toLocaleString()}
+                    </span>
+                  </button>
+                ))}
+              </div>
+
+              {tab === "competitions" ? (
+                <div role="tabpanel">
+                  <h3 className="text-lg font-semibold mb-3">Competitions Together</h3>
+                  <div className="overflow-x-auto rounded-lg border border-gray-200">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50 text-gray-500 uppercase text-xs">
+                        <tr>
+                          <th className="px-4 py-3 text-left">Competition</th>
+                          <th className="px-4 py-3 text-right whitespace-nowrap">Date</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {result.competitions.map((comp) => (
+                          <tr key={comp.id} className="hover:bg-gray-50 transition-colors">
+                            <td className="px-4 py-3">
+                              <a
+                                href={`${WCA_ORIGIN}/competitions/${comp.id}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-blue-600 hover:underline"
+                              >
+                                {comp.name}
+                              </a>
+                            </td>
+                            <td className="px-4 py-3 text-right text-gray-500 whitespace-nowrap">
+                              {formatDate(comp.start_date)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : (
+                <div role="tabpanel">
+                  <h3 className="text-lg font-semibold mb-1">Podiums Together</h3>
+                  <p className="mb-3 text-sm text-gray-500">
+                    {"They shared "}
+                    <span className="font-semibold text-gray-700">{result.podiums.length}</span>
+                    {result.podiums.length === 1 ? " final podium." : " final podiums."}
+                  </p>
+                  {result.podiums.length > 0 && (
+                    <div className="overflow-x-auto rounded-lg border border-gray-200">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50 text-gray-500 uppercase text-xs">
+                          <tr>
+                            <th className="px-4 py-3 text-left">Competition</th>
+                            <th className="px-4 py-3 text-left">Event</th>
+                            <th className="px-4 py-3 text-center" title={result.person1.name}>
+                              {result.person1.wca_id}
+                            </th>
+                            <th className="px-4 py-3 text-center" title={result.person2.name}>
+                              {result.person2.wca_id}
+                            </th>
+                            <th className="px-4 py-3 text-right whitespace-nowrap">Date</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {result.podiums.map((podium) => (
+                            <tr
+                              key={`${podium.competition_id}-${podium.event_id}`}
+                              className="hover:bg-gray-50 transition-colors"
+                            >
+                              <td className="px-4 py-3">
+                                <a
+                                  href={`${WCA_ORIGIN}/competitions/${podium.competition_id}/results/podiums`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-blue-600 hover:underline"
+                                >
+                                  {podium.competition_name}
+                                </a>
+                              </td>
+                              <td className="px-4 py-3">{podium.event_name}</td>
+                              <td className="px-4 py-3 text-center">{podium.pos1}</td>
+                              <td className="px-4 py-3 text-center">{podium.pos2}</td>
+                              <td className="px-4 py-3 text-right text-gray-500 whitespace-nowrap">
+                                {formatDate(podium.start_date)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
