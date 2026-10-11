@@ -239,11 +239,11 @@ const CompetitionsTogetherPage = () => {
                           <tr>
                             <th className="px-4 py-3 text-left">Competition</th>
                             <th className="px-4 py-3 text-left">Event</th>
-                            <th className="px-4 py-3 text-center" title={result.person1.name}>
-                              {result.person1.wca_id}
+                            <th className="px-4 py-3 text-center" title={result.person1.wca_id}>
+                              {result.person1.name}
                             </th>
-                            <th className="px-4 py-3 text-center" title={result.person2.name}>
-                              {result.person2.wca_id}
+                            <th className="px-4 py-3 text-center" title={result.person2.wca_id}>
+                              {result.person2.name}
                             </th>
                             <th className="px-4 py-3 text-right whitespace-nowrap">Date</th>
                           </tr>
