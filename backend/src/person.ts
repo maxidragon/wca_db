@@ -31,6 +31,7 @@ export interface PersonCompetition {
   total_rounds: number;
   solves: number;
   attempts: number;
+  personal_records: number;
 }
 
 export interface PersonProfile {
@@ -55,6 +56,7 @@ export interface PersonProfile {
     world_records: number;
     continental_records: number;
     national_records: number;
+    longest_personal_record_streak: number;
   };
   personal_bests: PersonalBest[];
   competitions: PersonCompetition[];
@@ -105,6 +107,13 @@ interface CompetitionRow extends RowDataPacket {
   total_rounds: number;
   solves: string;
   attempts: string;
+}
+
+interface PersonResultRow extends RowDataPacket {
+  competition_id: string;
+  event_id: string;
+  best: number;
+  average: number;
 }
 
 interface EntryTotalsRow extends RowDataPacket {
@@ -202,11 +211,66 @@ async function getPersonalBests(pool: Pool, wcaId: string): Promise<PersonalBest
   }));
 }
 
+/**
+ * Counts the personal records each competition brought, oldest first. A competition sets a
+ * record for an event's single or average when its best beats every earlier competition's,
+ * the first result counting as a record of its own. Each event and kind counts once per
+ * competition, however many rounds improved on it.
+ */
+function countPersonalRecords(
+  competitionIds: string[],
+  results: PersonResultRow[],
+): Map<string, number> {
+  const resultsByCompetition = new Map<string, PersonResultRow[]>();
+  for (const result of results) {
+    const group = resultsByCompetition.get(result.competition_id);
+    if (group) group.push(result);
+    else resultsByCompetition.set(result.competition_id, [result]);
+  }
+
+  const bestSoFar = new Map<string, number>();
+  const records = new Map<string, number>();
+  for (const competitionId of competitionIds) {
+    const bestHere = new Map<string, number>();
+    for (const result of resultsByCompetition.get(competitionId) ?? []) {
+      for (const [kind, value] of [
+        ["single", result.best],
+        ["average", result.average],
+      ] as const) {
+        if (value <= 0) continue;
+        const key = `${result.event_id}\u0000${kind}`;
+        bestHere.set(key, Math.min(value, bestHere.get(key) ?? Infinity));
+      }
+    }
+    let count = 0;
+    for (const [key, value] of bestHere) {
+      if (value < (bestSoFar.get(key) ?? Infinity)) {
+        bestSoFar.set(key, value);
+        count++;
+      }
+    }
+    records.set(competitionId, count);
+  }
+  return records;
+}
+
+/** The most competitions in a row, oldest first, that each set a personal record. */
+function longestPersonalRecordStreak(competitions: PersonCompetition[]): number {
+  let longest = 0;
+  let current = 0;
+  for (const competition of [...competitions].reverse()) {
+    current = competition.personal_records > 0 ? current + 1 : 0;
+    longest = Math.max(longest, current);
+  }
+  return longest;
+}
+
 async function getCompetitions(pool: Pool, wcaId: string): Promise<PersonCompetition[]> {
   // Aggregate the person's solves before joining all results at their competitions.
   // A round is an event/round-type pair, counted once regardless of entrant count.
-  const [rows] = await pool.query<CompetitionRow[]>(
-    `WITH mine AS (
+  const [[rows], [results]] = await Promise.all([
+    pool.query<CompetitionRow[]>(
+      `WITH mine AS (
        SELECT competition_id, COUNT(DISTINCT event_id) AS events,
               SUM(solves) AS solves, SUM(attempts) AS attempts
        FROM statistics_entries
@@ -226,7 +290,17 @@ async function getCompetitions(pool: Pool, wcaId: string): Promise<PersonCompeti
      JOIN results r ON r.competition_id = c.id
      GROUP BY c.id
      ORDER BY c.start_date DESC, c.id`,
-    [wcaId, wcaId],
+      [wcaId, wcaId],
+    ),
+    pool.query<PersonResultRow[]>(
+      `SELECT competition_id, event_id, best, average FROM results WHERE person_id = ?`,
+      [wcaId],
+    ),
+  ]);
+  // The list runs newest first, so it is walked backwards to see each record in turn.
+  const personalRecords = countPersonalRecords(
+    rows.map((row) => row.id).reverse(),
+    results,
   );
   return rows.map((row) => ({
     id: row.id,
@@ -242,6 +316,7 @@ async function getCompetitions(pool: Pool, wcaId: string): Promise<PersonCompeti
     total_rounds: Number(row.total_rounds),
     solves: Number(row.solves),
     attempts: Number(row.attempts),
+    personal_records: personalRecords.get(row.id) ?? 0,
   }));
 }
 
@@ -353,6 +428,7 @@ export async function getPersonProfile(
       world_records: Number(resultTotals.world_records ?? 0),
       continental_records: Number(resultTotals.continental_records ?? 0),
       national_records: Number(resultTotals.national_records ?? 0),
+      longest_personal_record_streak: longestPersonalRecordStreak(competitions),
     },
     personal_bests: personalBests,
     competitions,
