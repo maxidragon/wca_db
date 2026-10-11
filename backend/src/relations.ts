@@ -136,8 +136,11 @@ export async function podiumsTogether(
   wcaId1: string,
   wcaId2: string
 ): Promise<PodiumTogether[]> {
+  // The driver turns a DATE into local midnight, which serializes as the previous day
+  // east of UTC, so the date leaves the database as the calendar day it names.
   const [rows] = await pool.query<RowDataPacket[]>(
-    `SELECT r1.competition_id, c.name AS competition_name, c.start_date,
+    `SELECT r1.competition_id, c.name AS competition_name,
+            DATE_FORMAT(c.start_date, '%Y-%m-%d') AS start_date,
             r1.event_id, e.name AS event_name, r1.pos AS pos1, r2.pos AS pos2
      FROM results r1
      JOIN results r2 ON r2.competition_id = r1.competition_id
