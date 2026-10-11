@@ -116,3 +116,40 @@ export async function competitionsTogether(
   );
   return rows as { id: string; name: string }[];
 }
+
+export interface PodiumTogether {
+  competition_id: string;
+  competition_name: string;
+  start_date: string | null;
+  event_id: string;
+  event_name: string;
+  pos1: number;
+  pos2: number;
+}
+
+/**
+ * Final-round podiums both competitors stood on together, counting only successful
+ * results, as the person page does for its medal counts.
+ */
+export async function podiumsTogether(
+  pool: Pool,
+  wcaId1: string,
+  wcaId2: string
+): Promise<PodiumTogether[]> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT r1.competition_id, c.name AS competition_name, c.start_date,
+            r1.event_id, e.name AS event_name, r1.pos AS pos1, r2.pos AS pos2
+     FROM results r1
+     JOIN results r2 ON r2.competition_id = r1.competition_id
+       AND r2.event_id = r1.event_id AND r2.round_type_id = r1.round_type_id
+     JOIN competitions c ON c.id = r1.competition_id
+     JOIN events e ON e.id = r1.event_id
+     WHERE r1.person_id = ? AND r2.person_id = ?
+       AND r1.round_type_id IN ('c','f')
+       AND r1.best > 0 AND r1.pos <= 3
+       AND r2.best > 0 AND r2.pos <= 3
+     ORDER BY c.start_date DESC, c.id, e.\`rank\``,
+    [wcaId1, wcaId2]
+  );
+  return rows as PodiumTogether[];
+}
