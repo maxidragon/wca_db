@@ -24,6 +24,7 @@ export interface PersonCompetition {
   total_events: number;
   rounds: number;
   total_rounds: number;
+  competitors: number;
   solves: number;
   attempts: number;
   personal_records: number;

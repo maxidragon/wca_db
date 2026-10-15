@@ -29,6 +29,7 @@ export interface PersonCompetition {
   total_events: number;
   rounds: number;
   total_rounds: number;
+  competitors: number;
   solves: number;
   attempts: number;
   personal_records: number;
@@ -105,6 +106,7 @@ interface CompetitionRow extends RowDataPacket {
   total_events: number;
   rounds: number;
   total_rounds: number;
+  competitors: number;
   solves: string;
   attempts: string;
 }
@@ -283,7 +285,8 @@ async function getCompetitions(pool: Pool, wcaId: string): Promise<PersonCompeti
             COUNT(DISTINCT r.event_id) AS total_events,
             COUNT(DISTINCT CASE WHEN r.person_id = ? THEN r.event_id END,
                            r.round_type_id) AS rounds,
-            COUNT(DISTINCT r.event_id, r.round_type_id) AS total_rounds
+            COUNT(DISTINCT r.event_id, r.round_type_id) AS total_rounds,
+            COUNT(DISTINCT r.person_id) AS competitors
      FROM mine e
      JOIN competitions c ON c.id = e.competition_id
      JOIN countries co ON co.id = c.country_id
@@ -314,6 +317,7 @@ async function getCompetitions(pool: Pool, wcaId: string): Promise<PersonCompeti
     total_events: Number(row.total_events),
     rounds: Number(row.rounds),
     total_rounds: Number(row.total_rounds),
+    competitors: Number(row.competitors),
     solves: Number(row.solves),
     attempts: Number(row.attempts),
     personal_records: personalRecords.get(row.id) ?? 0,

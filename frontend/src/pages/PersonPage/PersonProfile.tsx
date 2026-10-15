@@ -315,6 +315,9 @@ export default function PersonProfileView({ profile }: { profile: PersonProfile 
                   City
                 </th>
                 <th scope="col" className="px-4 py-2 text-right">
+                  Competitors
+                </th>
+                <th scope="col" className="px-4 py-2 text-right">
                   Events
                 </th>
                 <th scope="col" className="px-4 py-2 text-right">
@@ -347,6 +350,9 @@ export default function PersonProfileView({ profile }: { profile: PersonProfile 
                   <td className="px-4 py-2 text-gray-600">{competition.venue}</td>
                   <td className="px-4 py-2 whitespace-nowrap text-gray-600">
                     {competition.city_name}, {competition.country_name}
+                  </td>
+                  <td className="px-4 py-2 text-right whitespace-nowrap text-gray-600">
+                    {competition.competitors}
                   </td>
                   <td className="px-4 py-2 text-right whitespace-nowrap text-gray-600">
                     {competition.events} / {competition.total_events}

@@ -260,6 +260,20 @@ integration(
   },
 );
 
+integration("each competition counts everyone who competed there once", async () => {
+  const { competitions } = await getPersonProfile(pool, "2025AAAA01");
+  assert.deepEqual(
+    competitions.map(({ id, competitors }) => ({ id, competitors })),
+    [
+      { id: "Beijing2026", competitors: 2 },
+      { id: "Krakow2026", competitors: 2 },
+      // Bob's several rounds and events make him one competitor, not four.
+      { id: "Warsaw2026", competitors: 2 },
+      { id: "Warsaw2025", competitors: 3 },
+    ],
+  );
+});
+
 integration("events and rounds distinguish personal participation from competition totals", async () => {
   const { competitions } = await getPersonProfile(pool, "2025AAAA01");
   assert.deepEqual(
