@@ -39,6 +39,7 @@ export default function QualificationsResults({
   isLoading,
   error,
   update,
+  prefetch,
 }: {
   current: QualificationsResult | null;
   shown: QualificationsResult | null;
@@ -50,6 +51,8 @@ export default function QualificationsResults({
   isLoading: boolean;
   error: string | null;
   update: (changes: Record<string, string | null>) => void;
+  /** Fetches a list's first page ahead, when a tab is pointed at. */
+  prefetch: (list: string) => void;
 }) {
   const checked = current ? current.events.filter((event) => event.count !== null) : [];
   const unchecked = current ? current.events.filter((event) => event.count === null) : [];
@@ -151,6 +154,8 @@ export default function QualificationsResults({
             <button
               type="button"
               onClick={() => update({ list: null, page: null })}
+              onMouseEnter={() => prefetch(UNIQUE_LIST)}
+              onFocus={() => prefetch(UNIQUE_LIST)}
               className={tabClass(list === UNIQUE_LIST)}
             >
               Unique competitors
@@ -163,6 +168,8 @@ export default function QualificationsResults({
                 key={event.event_id}
                 type="button"
                 onClick={() => update({ list: event.event_id, page: null })}
+                onMouseEnter={() => prefetch(event.event_id)}
+                onFocus={() => prefetch(event.event_id)}
                 className={tabClass(list === event.event_id)}
               >
                 {event.event_name}
@@ -226,7 +233,23 @@ export default function QualificationsResults({
           ) : (
             <>
               <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
-                <table className="w-full text-sm">
+                {/* Fixed widths shared by every list, so the name, ID and country columns stay put
+                    when switching lists instead of each list sizing them to its own rows. */}
+                <table className="w-full min-w-[48rem] table-fixed text-sm">
+                  <colgroup>
+                    <col className="w-16" />
+                    <col className="w-[28%]" />
+                    <col className="w-32" />
+                    <col className="w-44" />
+                    {tableSelected ? (
+                      <>
+                        <col className="w-28" />
+                        <col />
+                      </>
+                    ) : (
+                      <col />
+                    )}
+                  </colgroup>
                   <thead className="bg-gray-50 text-xs uppercase text-gray-500">
                     <tr>
                       <th className="px-4 py-2 text-right">#</th>
@@ -249,11 +272,13 @@ export default function QualificationsResults({
                         <td className="px-4 py-2 text-right text-gray-500">
                           {(table.page - 1) * table.page_size + index + 1}
                         </td>
-                        <td className="px-4 py-2">
+                        <td className="truncate px-4 py-2" title={qualifier.name}>
                           <PersonLink wcaId={qualifier.wca_id} name={qualifier.name} />
                         </td>
                         <td className="px-4 py-2 font-mono text-gray-600">{qualifier.wca_id}</td>
-                        <td className="px-4 py-2 text-gray-600">{qualifier.country_name ?? "—"}</td>
+                        <td className="truncate px-4 py-2 text-gray-600">
+                          {qualifier.country_name ?? "—"}
+                        </td>
                         {tableSelected && "result" in qualifier ? (
                           <>
                             <td className="px-4 py-2 text-right font-mono">
@@ -263,7 +288,7 @@ export default function QualificationsResults({
                                 tableSelected.requirement.result_type,
                               )}
                             </td>
-                            <td className="px-4 py-2">
+                            <td className="truncate px-4 py-2" title={qualifier.competition_name}>
                               <a
                                 href={`${WCA_ORIGIN}/competitions/${qualifier.competition_id}`}
                                 target="_blank"
@@ -278,7 +303,7 @@ export default function QualificationsResults({
                           // One line like every event list's rows, so switching between them
                           // keeps the table's height; the full list is on hover.
                           <td
-                            className="max-w-md truncate px-4 py-2 text-gray-600"
+                            className="truncate px-4 py-2 text-gray-600"
                             title={
                               "events" in qualifier
                                 ? qualifier.events.map((event) => eventNames.get(event) ?? event).join(", ")

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { backendRequest } from "../../utils/request";
 import { formatDate } from "../../utils/results";
@@ -21,8 +21,36 @@ import {
 
 const WCA_ORIGIN = "https://www.worldcubeassociation.org";
 const CUSTOM_MODE = "custom";
-// Pages already seen or fetched ahead; enough for every tab of a few competitions and filters.
+// Pages already seen or fetched ahead, kept for the session; enough for every tab of a few
+// competitions and filters. Lists only change with an import, and nothing in them is per user.
 const CACHED_PAGES = 200;
+// Tabs fetched ahead at once: quick enough to be ready before most clicks, without queuing
+// a dozen requests in front of the one the user is waiting for.
+const PREFETCH_CONCURRENCY = 3;
+const pageCache = new Map<string, QualificationsResult>();
+const inFlight = new Map<string, Promise<QualificationsResult>>();
+
+/**
+ * One page, from the cache, from a request already on its way, or from the backend. Sharing the
+ * request means a tab clicked while it is being fetched ahead waits for that fetch, not another.
+ */
+function loadPage(url: string): Promise<QualificationsResult> {
+  const cached = pageCache.get(url);
+  if (cached) return Promise.resolve(cached);
+  let request = inFlight.get(url);
+  if (!request) {
+    request = (async () => {
+      const res = await backendRequest(url, "GET", true);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Unknown error");
+      pageCache.set(url, data);
+      while (pageCache.size > CACHED_PAGES) pageCache.delete(pageCache.keys().next().value!);
+      return data;
+    })().finally(() => inFlight.delete(url));
+    inFlight.set(url, request);
+  }
+  return request;
+}
 
 function pageUrl(
   source: string,
@@ -63,14 +91,10 @@ const QualificationsPage = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [regions, setRegions] = useState<Region[]>([]);
   const [events, setEvents] = useState<EventOption[]>([]);
-  const pages = useRef(new Map<string, QualificationsResult>());
-  const remember = (url: string, data: QualificationsResult) => {
-    pages.current.delete(url);
-    pages.current.set(url, data);
-    while (pages.current.size > CACHED_PAGES) {
-      pages.current.delete(pages.current.keys().next().value!);
-    }
-  };
+  const url = source ? pageUrl(source, list, region, competedSince, page) : "";
+  // Read while rendering, so a page already here is drawn in the same frame as the click that
+  // asked for it, instead of one frame later once an effect has stored it.
+  const cachedPage = url ? (pageCache.get(url) ?? null) : null;
 
   // The statistics already name every region and current event, the same way these filters do.
   useEffect(() => {
@@ -89,47 +113,32 @@ const QualificationsPage = () => {
   }, []);
 
   // The lists follow the URL, so a shared link, the selected list and the page all load what
-  // they name. A page seen before, or fetched ahead, is shown at once.
+  // they name.
   useEffect(() => {
-    if (!source) {
+    if (!url) {
       setResult(null);
       setError(null);
       return;
     }
-    const url = pageUrl(source, list, region, competedSince, page);
-    const cached = pages.current.get(url);
-    if (cached) {
-      setResult({ source, data: cached });
-      setError(null);
-      setIsLoading(false);
-      return;
-    }
-    const request = new AbortController();
+    let cancelled = false;
     setError(null);
-    setIsLoading(true);
-    (async () => {
-      try {
-        const res = await backendRequest(url, "GET", true, undefined, request.signal);
-        const data = await res.json();
-        if (res.ok) {
-          remember(url, data);
-          setResult({ source, data });
-        }
-        else {
-          setResult(null);
-          setError(data.error || "Unknown error");
-        }
-      } catch (err) {
-        if (!request.signal.aborted) {
-          setResult(null);
-          setError(err instanceof Error ? err.message : "Could not load the qualifications");
-        }
-      } finally {
-        if (!request.signal.aborted) setIsLoading(false);
-      }
-    })();
-    return () => request.abort();
-  }, [source, list, region, competedSince, page]);
+    setIsLoading(!pageCache.has(url));
+    loadPage(url)
+      .then((data) => {
+        if (!cancelled) setResult({ source, data });
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setResult(null);
+        setError(err instanceof Error ? err.message : "Could not load the qualifications");
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [url, source]);
 
   const update = (changes: Record<string, string | null>) => {
     const next = new URLSearchParams(searchParams);
@@ -149,38 +158,45 @@ const QualificationsPage = () => {
       ...(competed ? { competed } : {}),
     });
 
-  const current = result && result.source === source ? result.data : null;
+  const loaded = result && result.source === source ? result.data : null;
+  const current = cachedPage ?? loaded;
   const shown =
-    current &&
-    current.list === list &&
-    current.region === region &&
-    current.competed_since === competedSince
-      ? current
-      : null;
+    cachedPage ??
+    (loaded &&
+    loaded.list === list &&
+    loaded.region === region &&
+    loaded.competed_since === competedSince
+      ? loaded
+      : null);
 
   // Once a competition or set has loaded, the first page of every other tab is fetched ahead,
-  // one at a time, so switching tabs swaps the list in one step instead of waiting on it.
+  // a few at a time, so switching tabs swaps the list in one step instead of waiting on it.
   const tabs = current
     ? [UNIQUE_LIST, ...current.events.filter((e) => e.count !== null).map((e) => e.event_id)].join(",")
     : "";
   useEffect(() => {
     if (!source || !tabs) return;
-    const request = new AbortController();
-    (async () => {
-      for (const tab of tabs.split(",")) {
-        const url = pageUrl(source, tab, region, competedSince, 1);
-        if (pages.current.has(url)) continue;
-        try {
-          const res = await backendRequest(url, "GET", true, undefined, request.signal);
-          if (res.ok) remember(url, await res.json());
-        } catch {
-          // Fetching ahead is best effort; the tab loads when picked.
-        }
-        if (request.signal.aborted) return;
+    let cancelled = false;
+    const queue = tabs
+      .split(",")
+      .map((tab) => pageUrl(source, tab, region, competedSince, 1))
+      .filter((tabUrl) => !pageCache.has(tabUrl));
+    const fetchAhead = async () => {
+      while (!cancelled && queue.length > 0) {
+        // Best effort: a tab that fails here loads, and reports its error, when picked.
+        await loadPage(queue.shift()!).catch(() => undefined);
       }
-    })();
-    return () => request.abort();
+    };
+    for (let i = 0; i < PREFETCH_CONCURRENCY; i++) void fetchAhead();
+    return () => {
+      cancelled = true;
+    };
   }, [source, tabs, region, competedSince]);
+
+  // Pointing at a tab fetches it, in case it has not been fetched ahead yet.
+  const prefetch = (tab: string) => {
+    if (source) loadPage(pageUrl(source, tab, region, competedSince, 1)).catch(() => undefined);
+  };
 
   // A saved view is named after what it shows; the name can be changed right after saving.
   const viewName = () => {
@@ -281,7 +297,8 @@ const QualificationsPage = () => {
         region={region}
         competed={competed}
         regions={regions}
-        isLoading={isLoading}
+        isLoading={isLoading && !cachedPage}
+        prefetch={prefetch}
         error={error}
         update={update}
       />
