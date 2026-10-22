@@ -30,8 +30,8 @@ export interface EventRequirement {
   event_name: string;
   requirement: Requirement;
   /**
-   * How many competitors meet it, or null when it is not checked: a top-N ranking is left to
-   * the organisers, and a malformed requirement cannot be checked at all.
+   * How many competitors meet it, or null when it is not checked: a top N requirement depends
+   * on who registers, and a malformed requirement cannot be checked at all.
    */
   count: number | null;
 }
@@ -164,8 +164,8 @@ export function parseRequirement(json: string | null): Requirement | null {
 
 /**
  * A requirement this view checks: a result better than a limit, or any successful result.
- * A top-N ranking is not, because the WCA admits anyone with a result and leaves the cut to
- * the organisers, so no list here would match the one they publish.
+ * A top N requirement is not: it admits the N best of the competitors who register, by their
+ * single or average, so who meets it depends on the registrations rather than on results alone.
  */
 function isChecked(requirement: Requirement | null): requirement is Requirement {
   if (!requirement) return false;

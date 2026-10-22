@@ -68,7 +68,7 @@ function describeRequirement(eventId: string, requirement: Requirement): string 
   const kind = requirement.result_type === "single" ? "Single" : "Average";
   const level = requirement.level ?? 0;
   if (requirement.type === "ranking") {
-    return `Top ${level} in the world by ${requirement.result_type}`;
+    return `Top ${level} registered competitors by ${requirement.result_type}`;
   }
   if (requirement.type === "anyResult") {
     return `Any successful ${requirement.result_type}`;
@@ -373,7 +373,7 @@ const QualificationsPage = () => {
             )}
             {unchecked.length > 0 && (
               <p className="mt-1 text-gray-500">
-                Not listed, because organisers trim a ranking requirement themselves:{" "}
+                Not listed, because a top N requirement depends on who registers:{" "}
                 {unchecked
                   .map(
                     (event) =>
@@ -401,7 +401,7 @@ const QualificationsPage = () => {
         ) : total === 0 ? (
           <p className="text-gray-600">
             {checked.length === 0
-              ? "This competition only has ranking requirements, which are not listed."
+              ? "This competition only has top N requirements, which depend on who registers and are not listed."
               : region === WORLD
                 ? "Nobody meets this requirement yet."
                 : "Nobody from this region meets this requirement yet."}

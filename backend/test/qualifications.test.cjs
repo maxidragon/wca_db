@@ -180,7 +180,7 @@ test(
 );
 
 test(
-  "a top-N ranking is shown but not checked, and a malformed requirement is left out",
+  "a top N requirement is shown but not checked, and a malformed requirement is left out",
   { skip: !socket },
   async () => {
     const service = createQualificationsService(pool);
@@ -203,7 +203,7 @@ test(
   { skip: !socket },
   async () => {
     const result = await createQualificationsService(pool).get("Champs2026", "unique", 1);
-    // Ada's 3x3 Blindfolded single would put her in the top two, but rankings are not counted.
+    // Ada has a 3x3 Blindfolded single, but a top N requirement is not counted.
     assert.equal(result.unique_count, 6);
     assert.deepEqual(
       result.qualifiers.map(({ wca_id, events }) => [wca_id, events]),
