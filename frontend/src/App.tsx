@@ -19,6 +19,9 @@ import type { ReactNode } from "react";
 
 const WCA_CLIENT_ID = "CC0A_AtlCDiKhPUqo3Voh1ow-PWfHc_wHnUagPZFjJw";
 const WCA_ORIGIN = "https://www.worldcubeassociation.org";
+// The OAuth redirect_uri is fixed, so the page the user logged in from (with its query string,
+// e.g. a shared query link) is kept here and restored once the login completes.
+const LOGIN_RETURN_PATH = "loginReturnPath";
 
 interface LoginResponseData {
   userInfo?: NavbarUserInfo;
@@ -66,7 +69,9 @@ function App() {
       if (status === 200 && data?.userInfo && data.token) {
         setUserInfo(data.userInfo);
         setToken(data.token);
-        navigate("/");
+        const returnPath = sessionStorage.getItem(LOGIN_RETURN_PATH);
+        sessionStorage.removeItem(LOGIN_RETURN_PATH);
+        navigate(returnPath || "/");
         toast.success("Succesfully logged in");
       } else {
         toast.error(data?.message || "Login failed");
@@ -90,6 +95,12 @@ function App() {
   }, [handleCode]);
 
   const handleWcaLogin = () => {
+    if (window.location.pathname !== "/auth/login") {
+      sessionStorage.setItem(
+        LOGIN_RETURN_PATH,
+        window.location.pathname + window.location.search
+      );
+    }
     const queryParams = new URLSearchParams({
       redirect_uri: `${window.location.origin}/auth/login`,
       scope: "public",

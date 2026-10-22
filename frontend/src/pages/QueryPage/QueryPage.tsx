@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { backendRequest } from "../../utils/request";
 import { Editor, useMonaco, type Monaco } from "@monaco-editor/react";
+import { useSearchParams } from "react-router-dom";
 import { getSchema } from "../../utils/utils";
 import { VscAdd, VscChromeClose } from "react-icons/vsc";
 import toast from "react-hot-toast";
@@ -29,7 +30,12 @@ interface SavedQuery {
 
 const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
   const monaco = useMonaco();
-  const [defaultQueryValue, setDefaultQueryValue] = useState<string>("");
+  const [searchParams] = useSearchParams();
+  // A shared link only fills the Sandbox: it never runs the query, which can be heavy and is
+  // logged against the user, and never touches the saved queries.
+  const [defaultQueryValue, setDefaultQueryValue] = useState<string>(
+    searchParams.get("query") || ""
+  );
   const [query, setQuery] = useState<string>(defaultQueryValue);
   const [results, setResults] = useState<QueryResultRow[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -311,7 +317,13 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
   const handleShare = () => {
     const base = window.location.origin + window.location.pathname;
     navigator.clipboard.writeText(`${base}?query=${encodeURIComponent(query)}`);
-    toast.success("Query link copied to clipboard");
+    // Parameter values stay out of the link: they can be personal, and whoever opens it gets
+    // the same inputs to fill in.
+    toast.success(
+      params.length > 0
+        ? "Query link copied to clipboard (parameter values are not included)"
+        : "Query link copied to clipboard"
+    );
   };
 
   const columns = results.length > 0 ? Object.keys(results[0]) : [];
