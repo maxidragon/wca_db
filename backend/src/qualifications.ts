@@ -64,6 +64,13 @@ export interface UniqueQualifier extends Competitor {
   events: string[];
 }
 
+/** The logged-in competitor's own row in the selected list, when they are in it. */
+export interface ViewerQualification<T> {
+  /** Their place in the list as filtered, counting from 1. */
+  position: number;
+  qualifier: T;
+}
+
 export interface QualificationsResult {
   /** The competition whose requirements these are, or null for custom requirements. */
   competition: {
@@ -84,6 +91,10 @@ export interface QualificationsResult {
   page: number;
   page_size: number;
   qualifiers: EventQualifier[] | UniqueQualifier[];
+  /** The logged-in competitor's WCA ID, whether or not they are in the list. */
+  viewer_wca_id: string | null;
+  /** The viewer's row, whichever page it is on, or null when they are not in the list. */
+  viewer: ViewerQualification<EventQualifier> | ViewerQualification<UniqueQualifier> | null;
 }
 
 interface CompetitionRow extends RowDataPacket {
@@ -130,6 +141,8 @@ interface RegionRow extends RowDataPacket {
 
 /** Filters that narrow every list and count, as a request names them. */
 export interface QualificationFilters {
+  /** The logged-in competitor's WCA ID, whose own row is returned apart from the page. */
+  viewer?: string | null;
   /** World by default, a continent or a country. */
   region?: string;
   /** A date written as YYYY-MM-DD. */
@@ -138,6 +151,8 @@ export interface QualificationFilters {
 
 /** The filters checked and ready to apply. */
 interface ResolvedFilters {
+  /** The logged-in competitor's WCA ID, if they have one, to find their own row. */
+  viewer: string | null;
   regionId: string;
   region: Region;
   competedSince: string | null;
@@ -537,48 +552,71 @@ async function servePage(
     unique_count: unique ? unique.length : computed.unique.persons.length,
     region: filters.regionId,
     competed_since: filters.competedSince,
+    viewer_wca_id: filters.viewer,
     list,
     page,
     page_size: QUALIFIERS_PAGE_SIZE,
   };
 
+  // The viewer's own row is looked up across the whole filtered list, not just this page, so
+  // it can be shown above any page with the place it holds.
+  const findViewer = (persons: string[], positions: number[]) => {
+    if (filters.viewer === null) return -1;
+    const index = persons.indexOf(filters.viewer);
+    return index === -1 ? -1 : positions.indexOf(index);
+  };
+
   if (list === UNIQUE_LIST) {
-    const positions = (unique ?? computed.unique.persons.map((_, index) => index)).slice(
-      start,
-      end,
-    );
+    const all = unique ?? computed.unique.persons.map((_, index) => index);
+    const viewerAt = findViewer(computed.unique.persons, all);
+    const positions = all.slice(start, end);
+    const pageSize = positions.length;
+    if (viewerAt !== -1 && !positions.includes(all[viewerAt])) positions.push(all[viewerAt]);
     const persons = positions.map((position) => computed.unique.persons[position]);
     const details = await competitors(pool, persons);
+    const rows = persons.map((person, index) => ({
+      ...details.get(person)!,
+      events: computed.unique.events[positions[index]],
+    }));
     return {
       ...base,
-      qualifiers: persons.map((person, index) => ({
-        ...details.get(person)!,
-        events: computed.unique.events[positions[index]],
-      })),
+      qualifiers: rows.slice(0, pageSize),
+      viewer:
+        viewerAt === -1
+          ? null
+          : { position: viewerAt + 1, qualifier: rows[positions.indexOf(all[viewerAt])] },
     };
   }
 
   const qualifiers = computed.lists.get(list)!;
   const requirement = computed.events.find((event) => event.event_id === list)!.requirement;
-  const positions = (
-    world
-      ? qualifiers.persons.map((_, index) => index)
-      : positionsIn(qualifiers.persons, kept)
-  ).slice(start, end);
+  const all = world
+    ? qualifiers.persons.map((_, index) => index)
+    : positionsIn(qualifiers.persons, kept);
+  const viewerAt = findViewer(qualifiers.persons, all);
+  const positions = all.slice(start, end);
+  const pageSize = positions.length;
+  // The viewer's row is fetched with the page's, in the same two lookups.
+  if (viewerAt !== -1 && !positions.includes(all[viewerAt])) positions.push(all[viewerAt]);
   const persons = positions.map((position) => qualifiers.persons[position]);
   const values = positions.map((position) => qualifiers.values[position]);
   const [details, achieved] = await Promise.all([
     competitors(pool, persons),
     achievedAt(pool, list, requirement, persons, values),
   ]);
+  const rows = persons.map((person, index) => ({
+    ...details.get(person)!,
+    result: values[index],
+    competition_id: achieved.get(person)?.competition_id ?? "",
+    competition_name: achieved.get(person)?.competition_name ?? "",
+  }));
   return {
     ...base,
-    qualifiers: persons.map((person, index) => ({
-      ...details.get(person)!,
-      result: values[index],
-      competition_id: achieved.get(person)?.competition_id ?? "",
-      competition_name: achieved.get(person)?.competition_name ?? "",
-    })),
+    qualifiers: rows.slice(0, pageSize),
+    viewer:
+      viewerAt === -1
+        ? null
+        : { position: viewerAt + 1, qualifier: rows[positions.indexOf(all[viewerAt])] },
   };
 }
 
@@ -762,6 +800,7 @@ export function createQualificationsService(pool: Pool) {
       throw new QualificationInputError("competed_since must be a date written as YYYY-MM-DD");
     }
     return {
+      viewer: filters.viewer ?? null,
       regionId,
       region,
       competedSince: since,

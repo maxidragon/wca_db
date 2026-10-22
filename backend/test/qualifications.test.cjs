@@ -305,6 +305,58 @@ test("a malformed competed-since date is rejected", { skip: !socket }, async () 
   );
 });
 
+test(
+  "the viewer's own row comes with any page, with their place in the filtered list",
+  { skip: !socket },
+  async () => {
+    const service = createQualificationsService(pool);
+    const event = await service.get("Champs2026", "333", 1, { viewer: "2020BENB01" });
+    assert.deepEqual(event.viewer, {
+      position: 4,
+      qualifier: {
+        wca_id: "2020BENB01",
+        name: "Ben",
+        country_id: "Spain",
+        country_name: "Spain",
+        result: 999,
+        competition_id: "Edge2026",
+        competition_name: "Edge 2026",
+      },
+    });
+    assert.equal(event.qualifiers.length, 4);
+
+    // A page that does not hold them still carries their row, and only it.
+    const past = await service.get("Champs2026", "333", 2, { viewer: "2020BENB01" });
+    assert.deepEqual(past.qualifiers, []);
+    assert.equal(past.viewer.position, 4);
+
+    const unique = await service.get("Champs2026", "unique", 1, { viewer: "2020ADAA01" });
+    assert.equal(unique.viewer.position, 1);
+    assert.deepEqual(unique.viewer.qualifier.events, ["333", "444"]);
+
+    // In Spain, Ben moves up to first.
+    const spain = await service.get("Champs2026", "333", 1, { viewer: "2020BENB01", region: "Spain" });
+    assert.equal(spain.viewer.position, 1);
+  },
+);
+
+test(
+  "a viewer who does not qualify, or is filtered out, has no row",
+  { skip: !socket },
+  async () => {
+    const service = createQualificationsService(pool);
+    // Eva only DNFed; Dan is Polish now, so a Spain filter leaves him out.
+    const eva = await service.get("Champs2026", "333", 1, { viewer: "2020EVAE01" });
+    assert.equal(eva.viewer, null);
+    assert.equal(eva.viewer_wca_id, "2020EVAE01");
+    assert.equal(
+      (await service.get("Champs2026", "unique", 1, { viewer: "2020DANI01", region: "Spain" })).viewer,
+      null,
+    );
+    assert.equal((await service.get("Champs2026", "333", 1)).viewer, null);
+  },
+);
+
 test("an unknown region is rejected", { skip: !socket }, async () => {
   await assert.rejects(
     createQualificationsService(pool).get("Champs2026", "unique", 1, { region: "Atlantis" }),

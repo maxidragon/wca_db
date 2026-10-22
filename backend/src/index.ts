@@ -397,6 +397,21 @@ app.get("/api/competitions/search", ensureAuthenticated, async (req: Request, re
   }
 });
 
+/**
+ * The logged-in competitor's WCA ID. Tokens from a login carry it; older tokens only carry the
+ * WCA account, which the dump's users table maps to it. Null for an account without one.
+ */
+async function viewerWcaId(req: Request): Promise<string | null> {
+  const user = (req as any).user ?? {};
+  if ("wcaId" in user) return user.wcaId || null;
+  if (!user.wcaUserId) return null;
+  const [[row]] = await pool.query<RowDataPacket[]>(
+    "SELECT wca_id FROM users WHERE id = ? LIMIT 1",
+    [user.wcaUserId]
+  );
+  return row?.wca_id || null;
+}
+
 function qualificationQuery(req: Request) {
   return {
     list: ((req.query.list as string) || UNIQUE_LIST).trim(),
@@ -440,8 +455,11 @@ app.get("/api/qualifications", ensureAuthenticated, async (req: Request, res: Re
   if (!Number.isInteger(page) || page < 1) {
     return res.status(400).json({ error: "page must be a positive integer" });
   }
-  await sendQualifications(res, () =>
-    qualificationsService.get(competitionId, list, page, filters)
+  await sendQualifications(res, async () =>
+    qualificationsService.get(competitionId, list, page, {
+      ...filters,
+      viewer: await viewerWcaId(req),
+    })
   );
 });
 
@@ -456,8 +474,11 @@ app.get("/api/qualifications/custom", ensureAuthenticated, async (req: Request, 
   if (!Number.isInteger(page) || page < 1) {
     return res.status(400).json({ error: "page must be a positive integer" });
   }
-  await sendQualifications(res, () =>
-    qualificationsService.getCustom(requirements, deadline, list, page, filters)
+  await sendQualifications(res, async () =>
+    qualificationsService.getCustom(requirements, deadline, list, page, {
+      ...filters,
+      viewer: await viewerWcaId(req),
+    })
   );
 });
 

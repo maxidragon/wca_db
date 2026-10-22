@@ -66,6 +66,10 @@ export interface QualificationsResult {
   page: number;
   page_size: number;
   qualifiers: EventQualifier[] | UniqueQualifier[];
+  /** The logged-in competitor's WCA ID, whether or not they are in the list. */
+  viewer_wca_id: string | null;
+  /** The logged-in competitor's row and place in the filtered list, when they are in it. */
+  viewer: { position: number; qualifier: EventQualifier | UniqueQualifier } | null;
 }
 
 const MULTI_BLIND_POINTS = 10000000;

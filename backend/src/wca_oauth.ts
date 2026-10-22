@@ -16,6 +16,7 @@ interface WcaUserInfo {
   me?: {
     id: number
     name: string
+    wca_id?: string | null
     avatar?: {
       thumb_url?: string
     }
@@ -60,6 +61,8 @@ export async function loginWithWca(req: Request, res: Response, _next: NextFunct
 
     const payload = {
       wcaUserId: userInfo.me.id,
+      // Null for an account without results yet; pages that point out the viewer read it.
+      wcaId: userInfo.me.wca_id ?? null,
       username: userInfo.me.name,
       avatarUrl: userInfo.me.avatar?.thumb_url,
       roles: [] as string[],

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { backendRequest } from "../../utils/request";
+import { getUserInfo } from "../../utils/wcaAuth";
 import { formatDate } from "../../utils/results";
 import CompetitionSearch from "./CompetitionSearch";
 import CustomRequirementsForm from "./CustomRequirementsForm";
@@ -22,7 +23,8 @@ import {
 const WCA_ORIGIN = "https://www.worldcubeassociation.org";
 const CUSTOM_MODE = "custom";
 // Pages already seen or fetched ahead, kept for the session; enough for every tab of a few
-// competitions and filters. Lists only change with an import, and nothing in them is per user.
+// competitions and filters. Lists only change with an import; the viewer's own row is the one
+// part that depends on who asks, so pages are kept per logged-in account.
 const CACHED_PAGES = 200;
 // Tabs fetched ahead at once: quick enough to be ready before most clicks, without queuing
 // a dozen requests in front of the one the user is waiting for.
@@ -34,20 +36,29 @@ const inFlight = new Map<string, Promise<QualificationsResult>>();
  * One page, from the cache, from a request already on its way, or from the backend. Sharing the
  * request means a tab clicked while it is being fetched ahead waits for that fetch, not another.
  */
+function cacheKey(url: string): string {
+  return `${getUserInfo()?.wcaUserId ?? ""}|${url}`;
+}
+
+function cachedPageFor(url: string): QualificationsResult | null {
+  return pageCache.get(cacheKey(url)) ?? null;
+}
+
 function loadPage(url: string): Promise<QualificationsResult> {
-  const cached = pageCache.get(url);
+  const key = cacheKey(url);
+  const cached = pageCache.get(key);
   if (cached) return Promise.resolve(cached);
-  let request = inFlight.get(url);
+  let request = inFlight.get(key);
   if (!request) {
     request = (async () => {
       const res = await backendRequest(url, "GET", true);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Unknown error");
-      pageCache.set(url, data);
+      pageCache.set(key, data);
       while (pageCache.size > CACHED_PAGES) pageCache.delete(pageCache.keys().next().value!);
       return data;
-    })().finally(() => inFlight.delete(url));
-    inFlight.set(url, request);
+    })().finally(() => inFlight.delete(key));
+    inFlight.set(key, request);
   }
   return request;
 }
@@ -94,7 +105,7 @@ const QualificationsPage = () => {
   const url = source ? pageUrl(source, list, region, competedSince, page) : "";
   // Read while rendering, so a page already here is drawn in the same frame as the click that
   // asked for it, instead of one frame later once an effect has stored it.
-  const cachedPage = url ? (pageCache.get(url) ?? null) : null;
+  const cachedPage = url ? cachedPageFor(url) : null;
 
   // The statistics already name every region and current event, the same way these filters do.
   useEffect(() => {
@@ -122,7 +133,7 @@ const QualificationsPage = () => {
     }
     let cancelled = false;
     setError(null);
-    setIsLoading(!pageCache.has(url));
+    setIsLoading(cachedPageFor(url) === null);
     loadPage(url)
       .then((data) => {
         if (!cancelled) setResult({ source, data });
@@ -180,7 +191,7 @@ const QualificationsPage = () => {
     const queue = tabs
       .split(",")
       .map((tab) => pageUrl(source, tab, region, competedSince, 1))
-      .filter((tabUrl) => !pageCache.has(tabUrl));
+      .filter((tabUrl) => cachedPageFor(tabUrl) === null);
     const fetchAhead = async () => {
       while (!cancelled && queue.length > 0) {
         // Best effort: a tab that fails here loads, and reports its error, when picked.

@@ -4,8 +4,11 @@ import {
   describeRequirement,
   UNIQUE_LIST,
   WORLD,
+  type EventQualifier,
+  type EventRequirement,
   type QualificationsResult,
   type Region,
+  type UniqueQualifier,
 } from "./requirements";
 
 const WCA_ORIGIN = "https://www.worldcubeassociation.org";
@@ -20,6 +23,80 @@ function PersonLink({ wcaId, name }: { wcaId: string; name: string }) {
     >
       {name}
     </a>
+  );
+}
+
+/**
+ * One competitor in a list: their result and where they got it for an event, or the events
+ * they meet for the unique list. The viewer's rows are highlighted, and the pinned copy above
+ * the page is set off from the rows under it.
+ */
+function QualifierRow({
+  qualifier,
+  position,
+  viewer,
+  pinned,
+  selected,
+  eventNames,
+}: {
+  qualifier: EventQualifier | UniqueQualifier;
+  position: number;
+  viewer: boolean;
+  pinned: boolean;
+  selected: EventRequirement | null;
+  eventNames: Map<string, string>;
+}) {
+  return (
+    <tr
+      className={`${viewer ? "bg-blue-50" : "hover:bg-gray-50"} ${
+        pinned ? "border-b-2 border-blue-200" : ""
+      }`}
+    >
+      <td className="px-4 py-2 text-right text-gray-500">{position.toLocaleString()}</td>
+      <td className="truncate px-4 py-2" title={qualifier.name}>
+        <PersonLink wcaId={qualifier.wca_id} name={qualifier.name} />
+        {viewer && (
+          <span className="ml-2 rounded bg-blue-600 px-1.5 py-0.5 text-xs font-medium text-white">
+            You
+          </span>
+        )}
+      </td>
+      <td className="px-4 py-2 font-mono text-gray-600">{qualifier.wca_id}</td>
+      <td className="truncate px-4 py-2 text-gray-600">{qualifier.country_name ?? "—"}</td>
+      {selected && "result" in qualifier ? (
+        <>
+          <td className="px-4 py-2 text-right font-mono">
+            {formatResult(qualifier.result, selected.event_id, selected.requirement.result_type)}
+          </td>
+          <td className="truncate px-4 py-2" title={qualifier.competition_name}>
+            <a
+              href={`${WCA_ORIGIN}/competitions/${qualifier.competition_id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-600 hover:underline"
+            >
+              {qualifier.competition_name}
+            </a>
+          </td>
+        </>
+      ) : (
+        // One line like every event list's rows, so switching between them keeps the table's
+        // height; the full list is on hover.
+        <td
+          className="truncate px-4 py-2 text-gray-600"
+          title={
+            "events" in qualifier
+              ? qualifier.events.map((event) => eventNames.get(event) ?? event).join(", ")
+              : undefined
+          }
+        >
+          {"events" in qualifier &&
+            `${qualifier.events.length} · ${qualifier.events
+              .map((event) => eventNames.get(event) ?? event)
+              .join(", ")}`}
+        </td>
+      )}
+    </tr>
   );
 }
 
@@ -267,56 +344,39 @@ export default function QualificationsResults({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {table.qualifiers.map((qualifier, index) => (
-                      <tr key={qualifier.wca_id} className="transition-colors hover:bg-gray-50">
-                        <td className="px-4 py-2 text-right text-gray-500">
-                          {(table.page - 1) * table.page_size + index + 1}
+                    {/* The logged-in competitor's own row, pinned above whichever page this is.
+                        It is there for every list, met or not, so switching lists keeps the
+                        table's height. */}
+                    {!table.viewer && table.viewer_wca_id && (
+                      <tr className="border-b-2 border-blue-200 bg-gray-50">
+                        <td className="px-4 py-2 text-right text-gray-400">—</td>
+                        <td colSpan={tableSelected ? 5 : 4} className="truncate px-4 py-2 text-gray-500">
+                          You ({table.viewer_wca_id}) are not in this list
+                          {region !== WORLD || competed !== "" ? " with these filters" : ""}.
                         </td>
-                        <td className="truncate px-4 py-2" title={qualifier.name}>
-                          <PersonLink wcaId={qualifier.wca_id} name={qualifier.name} />
-                        </td>
-                        <td className="px-4 py-2 font-mono text-gray-600">{qualifier.wca_id}</td>
-                        <td className="truncate px-4 py-2 text-gray-600">
-                          {qualifier.country_name ?? "—"}
-                        </td>
-                        {tableSelected && "result" in qualifier ? (
-                          <>
-                            <td className="px-4 py-2 text-right font-mono">
-                              {formatResult(
-                                qualifier.result,
-                                tableSelected.event_id,
-                                tableSelected.requirement.result_type,
-                              )}
-                            </td>
-                            <td className="truncate px-4 py-2" title={qualifier.competition_name}>
-                              <a
-                                href={`${WCA_ORIGIN}/competitions/${qualifier.competition_id}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-blue-600 hover:underline"
-                              >
-                                {qualifier.competition_name}
-                              </a>
-                            </td>
-                          </>
-                        ) : (
-                          // One line like every event list's rows, so switching between them
-                          // keeps the table's height; the full list is on hover.
-                          <td
-                            className="truncate px-4 py-2 text-gray-600"
-                            title={
-                              "events" in qualifier
-                                ? qualifier.events.map((event) => eventNames.get(event) ?? event).join(", ")
-                                : undefined
-                            }
-                          >
-                            {"events" in qualifier &&
-                              `${qualifier.events.length} · ${qualifier.events
-                                .map((event) => eventNames.get(event) ?? event)
-                                .join(", ")}`}
-                          </td>
-                        )}
                       </tr>
+                    )}
+                    {table.viewer && (
+                      <QualifierRow
+                        key={`viewer-${table.viewer.qualifier.wca_id}`}
+                        qualifier={table.viewer.qualifier}
+                        position={table.viewer.position}
+                        viewer
+                        pinned
+                        selected={tableSelected}
+                        eventNames={eventNames}
+                      />
+                    )}
+                    {table.qualifiers.map((qualifier, index) => (
+                      <QualifierRow
+                        key={qualifier.wca_id}
+                        qualifier={qualifier}
+                        position={(table.page - 1) * table.page_size + index + 1}
+                        viewer={qualifier.wca_id === table.viewer?.qualifier.wca_id}
+                        pinned={false}
+                        selected={tableSelected}
+                        eventNames={eventNames}
+                      />
                     ))}
                   </tbody>
                 </table>
