@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   formatLimit,
   isTimed,
@@ -18,11 +18,9 @@ interface Row {
   value: string;
 }
 
-let nextKey = 0;
-
-function toRow({ eventId, resultType, level }: CustomRequirement): Row {
+function toRow({ eventId, resultType, level }: CustomRequirement, key: number): Row {
   return {
-    key: nextKey++,
+    key,
     eventId,
     resultType,
     kind: level === null ? "any" : "limit",
@@ -59,15 +57,21 @@ export default function CustomRequirementsForm({
   disabled: boolean;
   onSubmit: (requirements: CustomRequirement[], deadline: string) => void;
 }) {
+  // Rows are found by key when edited, so two rows sharing one would change together. The counter
+  // lives with the rows, so a hot reload that keeps the rows keeps it too, instead of restarting
+  // it at zero under keys that are already taken.
+  const nextKey = useRef(0);
   const newRow = (eventId: string): Row => ({
-    key: nextKey++,
+    key: nextKey.current++,
     eventId,
     resultType: defaultResultType(events.find((event) => event.id === eventId)),
     kind: "limit",
     value: "",
   });
   const [rows, setRows] = useState<Row[]>(() =>
-    initial.length > 0 ? initial.map(toRow) : [newRow("333")],
+    initial.length > 0
+      ? initial.map((requirement) => toRow(requirement, nextKey.current++))
+      : [newRow("333")],
   );
   const [deadline, setDeadline] = useState(initialDeadline);
   const [errors, setErrors] = useState<Record<number, string>>({});
