@@ -25,6 +25,9 @@ const outsideFile = path.join(os.tmpdir(), `wca_query_test_${process.pid}.txt`);
 // MariaDB error numbers the read-only user's attempts end in.
 const ER_DBACCESS_DENIED = 1044;
 const ER_TABLEACCESS_DENIED = 1142;
+// A missing FILE privilege. MariaDB 12 reports it by name; 10.11, which the CI runner
+// installs, reports the same errno as a failed login, so withQueryConnection rules that out.
+const ER_ACCESS_DENIED = 1045;
 const ER_SPECIFIC_ACCESS_DENIED = 1227;
 
 before(async () => {
@@ -68,6 +71,24 @@ after(async () => {
   await admin.query(`DROP DATABASE IF EXISTS \`${database}\``);
   await admin.end();
 });
+
+/**
+ * Runs `use` on one pool connection after a plain SELECT on it has succeeded as the query
+ * user, so an access-denied error inside is about the statement, never the login.
+ */
+async function withQueryConnection(use) {
+  const connection = await queryPool.getConnection();
+  try {
+    const [[{ account, persons }]] = await connection.query(
+      "SELECT CURRENT_USER() AS account, COUNT(*) AS persons FROM persons",
+    );
+    assert.equal(account, `${queryUser}@localhost`);
+    assert.equal(persons, 3);
+    await use(connection);
+  } finally {
+    connection.release();
+  }
+}
 
 async function rejectsWith(promise, errnos) {
   await assert.rejects(promise, (err) => {
@@ -148,10 +169,12 @@ test("the query user cannot write or read files on the database host", { skip: !
   const target = path.join(os.tmpdir(), `wca_query_test_${process.pid}_out.txt`);
   // With their own LIMIT, these reach the database exactly as written.
   for (const into of ["OUTFILE", "DUMPFILE"]) {
-    await rejectsWith(
-      runUserQuery(queryPool, `SELECT name FROM persons LIMIT 1 INTO ${into} '${target}'`, 1, 50),
-      [ER_SPECIFIC_ACCESS_DENIED],
-    );
+    await withQueryConnection(async (connection) => {
+      await rejectsWith(
+        runUserQuery(connection, `SELECT name FROM persons LIMIT 1 INTO ${into} '${target}'`, 1, 50),
+        [ER_ACCESS_DENIED, ER_SPECIFIC_ACCESS_DENIED],
+      );
+    });
     assert.equal(existsSync(target), false);
   }
 
@@ -176,7 +199,9 @@ test("the query user cannot change data, schema or other databases", { skip: !so
     "CREATE DATABASE wca_query_test_other",
     "SELECT * FROM mysql.user",
   ]) {
-    await rejectsWith(queryPool.query(sql), [ER_TABLEACCESS_DENIED, ER_DBACCESS_DENIED]);
+    await withQueryConnection((connection) =>
+      rejectsWith(connection.query(sql), [ER_TABLEACCESS_DENIED, ER_DBACCESS_DENIED]),
+    );
   }
   const [[{ count }]] = await admin.query(`SELECT COUNT(*) AS count FROM \`${database}\`.persons`);
   assert.equal(count, 3);
