@@ -17,6 +17,8 @@ const EVENT_CONCURRENCY = 3;
 const CACHED_COMPUTATIONS = 5;
 // A custom set holds at most one requirement per event, and there are fewer events than this.
 export const MAX_CUSTOM_REQUIREMENTS = 20;
+// Who competed since a date is one set per date; a few dates cover the presets people use.
+const CACHED_COMPETED_SINCE = 4;
 // An attempt result is a signed 32-bit integer in the export.
 const MAX_LEVEL = 2147483647;
 
@@ -76,6 +78,8 @@ export interface QualificationsResult {
   unique_count: number;
   /** World, a continent or a country id, matched against current nationality. */
   region: string;
+  /** Only competitors with a result at a competition ending on or after this date, if set. */
+  competed_since: string | null;
   list: string;
   page: number;
   page_size: number;
@@ -122,6 +126,23 @@ interface NameRow extends RowDataPacket {
 
 interface RegionRow extends RowDataPacket {
   kind: "continent" | "country";
+}
+
+/** Filters that narrow every list and count, as a request names them. */
+export interface QualificationFilters {
+  /** World by default, a continent or a country. */
+  region?: string;
+  /** A date written as YYYY-MM-DD. */
+  competed_since?: string | null;
+}
+
+/** The filters checked and ready to apply. */
+interface ResolvedFilters {
+  regionId: string;
+  region: Region;
+  competedSince: string | null;
+  /** Everyone with a result since competedSince, or null when it is not set. */
+  competed: Set<string> | null;
 }
 
 /** Which competitors a list keeps: everyone, or those currently from a continent or country. */
@@ -485,31 +506,37 @@ function positionsIn(persons: string[], inRegion: (person: string) => boolean): 
 }
 
 /**
- * One page of a list for a region. The cached lists hold the world, so a region filters them
- * here: a few hundred thousand map lookups per list, milliseconds next to computing them.
+ * One page of a list, filtered. The cached lists hold everyone, so the region and the
+ * competed-since filter narrow them here: a few hundred thousand lookups per list,
+ * milliseconds next to computing them.
  */
 async function servePage(
   pool: Pool,
   computed: ComputedQualifications,
   list: string,
   page: number,
-  regionId: string,
-  region: Region,
+  filters: ResolvedFilters,
 ): Promise<QualificationsResult> {
   const start = (page - 1) * QUALIFIERS_PAGE_SIZE;
   const end = start + QUALIFIERS_PAGE_SIZE;
-  const inRegion = regionFilter(computed, region);
-  const world = region.kind === "world";
-  const unique = world ? null : positionsIn(computed.unique.persons, inRegion);
+  const inRegion = regionFilter(computed, filters.region);
+  const competed = filters.competed;
+  const kept = competed
+    ? (person: string) => competed.has(person) && inRegion(person)
+    : inRegion;
+  // Named world for the unfiltered case, which skips filtering altogether.
+  const world = filters.region.kind === "world" && competed === null;
+  const unique = world ? null : positionsIn(computed.unique.persons, kept);
   const base = {
     competition: computed.competition,
     events: computed.events.map((event) => {
       const qualifiers = computed.lists.get(event.event_id);
       if (!qualifiers || world) return event;
-      return { ...event, count: qualifiers.persons.filter(inRegion).length };
+      return { ...event, count: qualifiers.persons.filter(kept).length };
     }),
     unique_count: unique ? unique.length : computed.unique.persons.length,
-    region: regionId,
+    region: filters.regionId,
+    competed_since: filters.competedSince,
     list,
     page,
     page_size: QUALIFIERS_PAGE_SIZE,
@@ -536,7 +563,7 @@ async function servePage(
   const positions = (
     world
       ? qualifiers.persons.map((_, index) => index)
-      : positionsIn(qualifiers.persons, inRegion)
+      : positionsIn(qualifiers.persons, kept)
   ).slice(start, end);
   const persons = positions.map((position) => qualifiers.persons[position]);
   const values = positions.map((position) => qualifiers.values[position]);
@@ -686,38 +713,90 @@ export function createQualificationsService(pool: Pool) {
     return work;
   };
 
-  const region = async (regionId: string) => {
-    const resolved = await resolveRegion(pool, regionId);
-    if (!resolved) {
+  const competedSets = new Map<string, Promise<Set<string>>>();
+  /**
+   * Everyone with a result at a competition that ended on or after the date. The competitions
+   * index on end date leads, and results are read by competition through a covering index, so
+   * a year of competitions costs about a second; the set is kept per export and date.
+   */
+  const competedSince = async (date: string) => {
+    const [[metadata]] = await pool.query<RowDataPacket[]>(
+      "SELECT value FROM wca_statistics_metadata WHERE field = 'export_timestamp' LIMIT 1",
+    );
+    const key = JSON.stringify([metadata?.value ?? null, date]);
+    let work = competedSets.get(key);
+    if (work) {
+      competedSets.delete(key);
+      competedSets.set(key, work);
+      return work;
+    }
+    work = pool
+      .query<RowDataPacket[]>(
+        `SET STATEMENT max_statement_time=${QUALIFICATION_TIMEOUT_SECONDS} FOR
+         SELECT DISTINCT r.person_id
+         FROM competitions c
+         JOIN results r ON r.competition_id = c.id
+         WHERE c.end_date >= ?`,
+        [date],
+      )
+      .then(([rows]) => new Set(rows.map((row) => row.person_id as string)));
+    // A failed computation is not kept, so the next request tries again.
+    work.catch(() => competedSets.delete(key));
+    if (metadata?.value) {
+      competedSets.set(key, work);
+      while (competedSets.size > CACHED_COMPETED_SINCE) {
+        competedSets.delete(competedSets.keys().next().value!);
+      }
+    }
+    return work;
+  };
+
+  const resolveFilters = async (filters: QualificationFilters): Promise<ResolvedFilters> => {
+    const regionId = filters.region ?? WORLD;
+    const region = await resolveRegion(pool, regionId);
+    if (!region) {
       throw new QualificationInputError("region must be World, a continent or a country");
     }
-    return resolved;
+    const since = filters.competed_since ?? null;
+    if (since !== null && !isIsoDate(since)) {
+      throw new QualificationInputError("competed_since must be a date written as YYYY-MM-DD");
+    }
+    return {
+      regionId,
+      region,
+      competedSince: since,
+      competed: since === null ? null : await competedSince(since),
+    };
   };
 
   const page = (
     result: ComputedQualifications,
     list: string,
     pageNumber: number,
-    regionId: string,
-    resolved: Region,
+    filters: ResolvedFilters,
   ) => {
     if (list !== UNIQUE_LIST && !result.lists.has(list)) {
       throw new QualificationInputError(
         "list must be unique or an event with a checked requirement",
       );
     }
-    return servePage(pool, result, list, pageNumber, regionId, resolved);
+    return servePage(pool, result, list, pageNumber, filters);
   };
 
   return {
     /** A competition's own requirements, or null when there is no such competition. */
-    async get(competitionId: string, list: string, pageNumber: number, regionId: string = WORLD) {
-      const resolved = await region(regionId);
+    async get(
+      competitionId: string,
+      list: string,
+      pageNumber: number,
+      filters: QualificationFilters = {},
+    ) {
+      const resolved = await resolveFilters(filters);
       const result = await computed(["competition", competitionId.toLowerCase()], () =>
         computeCompetition(pool, competitionId),
       );
       if (!result) return null;
-      return page(result, list, pageNumber, regionId, resolved);
+      return page(result, list, pageNumber, resolved);
     },
 
     /** Requirements the user sets; see parseCustomRequirements for the format. */
@@ -726,10 +805,10 @@ export function createQualificationsService(pool: Pool) {
       deadline: string | null,
       list: string,
       pageNumber: number,
-      regionId: string = WORLD,
+      filters: QualificationFilters = {},
     ) {
       const requirements = parseCustomRequirements(spec, deadline);
-      const resolved = await region(regionId);
+      const resolved = await resolveFilters(filters);
       // The same set written in another order is the same computation.
       const identity = [
         "custom",
@@ -739,7 +818,7 @@ export function createQualificationsService(pool: Pool) {
           .map(({ event_id, requirement }) => [event_id, requirement.result_type, requirement.level]),
       ];
       const result = await computed(identity, () => computeCustom(pool, requirements));
-      return page(result!, list, pageNumber, regionId, resolved);
+      return page(result!, list, pageNumber, resolved);
     },
   };
 }

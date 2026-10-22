@@ -400,7 +400,10 @@ app.get("/api/competitions/search", ensureAuthenticated, async (req: Request, re
 function qualificationQuery(req: Request) {
   return {
     list: ((req.query.list as string) || UNIQUE_LIST).trim(),
-    region: ((req.query.region as string) || WORLD).trim(),
+    filters: {
+      region: ((req.query.region as string) || WORLD).trim(),
+      competed_since: ((req.query.competed_since as string) || "").trim() || null,
+    },
     page: req.query.page === undefined ? 1 : Number(req.query.page),
   };
 }
@@ -429,7 +432,7 @@ async function sendQualifications(res: Response, load: () => Promise<unknown | n
 
 app.get("/api/qualifications", ensureAuthenticated, async (req: Request, res: Response) => {
   const competitionId = ((req.query.competition_id as string) || "").trim();
-  const { list, region, page } = qualificationQuery(req);
+  const { list, filters, page } = qualificationQuery(req);
 
   if (!competitionId || competitionId.length > 32) {
     return res.status(400).json({ error: "A valid competition_id is required" });
@@ -438,14 +441,14 @@ app.get("/api/qualifications", ensureAuthenticated, async (req: Request, res: Re
     return res.status(400).json({ error: "page must be a positive integer" });
   }
   await sendQualifications(res, () =>
-    qualificationsService.get(competitionId, list, page, region)
+    qualificationsService.get(competitionId, list, page, filters)
   );
 });
 
 app.get("/api/qualifications/custom", ensureAuthenticated, async (req: Request, res: Response) => {
   const requirements = ((req.query.requirements as string) || "").trim();
   const deadline = ((req.query.deadline as string) || "").trim() || null;
-  const { list, region, page } = qualificationQuery(req);
+  const { list, filters, page } = qualificationQuery(req);
 
   if (!requirements || requirements.length > 1000) {
     return res.status(400).json({ error: "requirements are required" });
@@ -454,7 +457,7 @@ app.get("/api/qualifications/custom", ensureAuthenticated, async (req: Request, 
     return res.status(400).json({ error: "page must be a positive integer" });
   }
   await sendQualifications(res, () =>
-    qualificationsService.getCustom(requirements, deadline, list, page, region)
+    qualificationsService.getCustom(requirements, deadline, list, page, filters)
   );
 });
 

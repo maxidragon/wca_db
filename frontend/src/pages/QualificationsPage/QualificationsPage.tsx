@@ -5,9 +5,13 @@ import { formatDate } from "../../utils/results";
 import CompetitionSearch from "./CompetitionSearch";
 import CustomRequirementsForm from "./CustomRequirementsForm";
 import QualificationsResults from "./QualificationsResults";
+import SavedViews from "./SavedViews";
 import {
+  COMPETED_PRESETS,
+  competedSinceDate,
   decodeCustom,
   encodeCustom,
+  viewParams,
   UNIQUE_LIST,
   WORLD,
   type EventOption,
@@ -26,6 +30,8 @@ const QualificationsPage = () => {
   const deadline = searchParams.get("deadline") || "";
   const list = searchParams.get("list") || UNIQUE_LIST;
   const region = searchParams.get("region") || WORLD;
+  const competed = searchParams.get("competed") || "";
+  const competedSince = competedSinceDate(competed);
   const page = Math.max(1, Number(searchParams.get("page")) || 1);
   // What the lists are of: one competition's requirements, or a custom set. A result belongs
   // to the source it was loaded for, so switching sources never shows the previous one's lists.
@@ -74,7 +80,9 @@ const QualificationsPage = () => {
     (async () => {
       try {
         const res = await backendRequest(
-          `${source}&list=${encodeURIComponent(list)}&region=${encodeURIComponent(region)}&page=${page}`,
+          `${source}&list=${encodeURIComponent(list)}&region=${encodeURIComponent(region)}${
+            competedSince ? `&competed_since=${competedSince}` : ""
+          }&page=${page}`,
           "GET",
           true,
           undefined,
@@ -96,7 +104,7 @@ const QualificationsPage = () => {
       }
     })();
     return () => request.abort();
-  }, [source, list, region, page]);
+  }, [source, list, region, competedSince, page]);
 
   const update = (changes: Record<string, string | null>) => {
     const next = new URLSearchParams(searchParams);
@@ -107,13 +115,39 @@ const QualificationsPage = () => {
     setSearchParams(next);
   };
 
-  // A new source starts at the unique list's first page. The region usually outlives it: a
+  // A new source starts at the unique list's first page. The filters usually outlive it: a
   // national team checks one competition, or one set of limits, after another.
   const showSource = (params: Record<string, string>) =>
-    setSearchParams(region === WORLD ? params : { ...params, region });
+    setSearchParams({
+      ...params,
+      ...(region === WORLD ? {} : { region }),
+      ...(competed ? { competed } : {}),
+    });
 
   const current = result && result.source === source ? result.data : null;
-  const shown = current && current.list === list && current.region === region ? current : null;
+  const shown =
+    current &&
+    current.list === list &&
+    current.region === region &&
+    current.competed_since === competedSince
+      ? current
+      : null;
+
+  // A saved view is named after what it shows; the name can be changed right after saving.
+  const viewName = () => {
+    if (!current) return "";
+    const base = current.competition
+      ? current.competition.name
+      : current.events.map((event) => event.event_name).join(", ");
+    const filters = [
+      region === WORLD ? null : regions.find((r) => r.id === region)?.name ?? region,
+      competed
+        ? COMPETED_PRESETS.find((preset) => preset.id === competed)?.label.toLowerCase() ??
+          `since ${competed}`
+        : null,
+    ].filter(Boolean);
+    return filters.length > 0 ? `${base} (${filters.join(", ")})` : base;
+  };
 
   const modeClass = (active: boolean) =>
     `cursor-pointer rounded px-3 py-1.5 font-medium transition-colors ${
@@ -127,6 +161,12 @@ const QualificationsPage = () => {
         Everyone who meets a competition's qualification requirements, or requirements you set,
         per event and as one list of unique competitors.
       </p>
+
+      <SavedViews
+        current={current ? viewParams(searchParams) : null}
+        defaultName={viewName()}
+        onOpen={(params) => setSearchParams(new URLSearchParams(params))}
+      />
 
       <div className="mb-6 inline-flex rounded-lg border border-gray-300 bg-white p-1 text-sm">
         <button
@@ -190,6 +230,7 @@ const QualificationsPage = () => {
         shown={shown}
         list={list}
         region={region}
+        competed={competed}
         regions={regions}
         isLoading={isLoading}
         error={error}

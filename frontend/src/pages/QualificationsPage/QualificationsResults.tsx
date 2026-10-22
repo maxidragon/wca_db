@@ -1,5 +1,6 @@
 import { formatDate, formatResult } from "../../utils/results";
 import {
+  COMPETED_PRESETS,
   describeRequirement,
   UNIQUE_LIST,
   WORLD,
@@ -32,6 +33,7 @@ export default function QualificationsResults({
   shown,
   list,
   region,
+  competed,
   regions,
   isLoading,
   error,
@@ -41,6 +43,8 @@ export default function QualificationsResults({
   shown: QualificationsResult | null;
   list: string;
   region: string;
+  /** A competed preset id, a YYYY-MM-DD date, or empty for any time. */
+  competed: string;
   regions: Region[];
   isLoading: boolean;
   error: string | null;
@@ -62,7 +66,8 @@ export default function QualificationsResults({
     <>
       {current && current.events.length > 0 && (
         <>
-          <label className="mb-3 flex items-center gap-2 text-sm font-medium text-gray-700">
+          <div className="mb-3 flex flex-wrap items-center gap-x-6 gap-y-2">
+          <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
             Region
             <select
               aria-label="Region"
@@ -87,6 +92,51 @@ export default function QualificationsResults({
             </select>
             <span className="font-normal text-gray-500">by current nationality</span>
           </label>
+          <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+            Competed
+            <select
+              aria-label="Competed"
+              value={
+                competed === "" || COMPETED_PRESETS.some((preset) => preset.id === competed)
+                  ? competed
+                  : "date"
+              }
+              onChange={(e) => {
+                const value = e.target.value;
+                // A date starts from a year ago, which the field beside it then changes.
+                const since = new Date();
+                since.setFullYear(since.getFullYear() - 1);
+                update({
+                  competed:
+                    value === ""
+                      ? null
+                      : value === "date"
+                        ? since.toISOString().slice(0, 10)
+                        : value,
+                  page: null,
+                });
+              }}
+              className="rounded border border-gray-300 bg-white px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-400"
+            >
+              <option value="">Any time</option>
+              {COMPETED_PRESETS.map((preset) => (
+                <option key={preset.id} value={preset.id}>
+                  {preset.label}
+                </option>
+              ))}
+              <option value="date">Since a date</option>
+            </select>
+            {/^\d{4}-\d{2}-\d{2}$/.test(competed) && (
+              <input
+                type="date"
+                aria-label="Competed since"
+                value={competed}
+                onChange={(e) => e.target.value && update({ competed: e.target.value, page: null })}
+                className="rounded border border-gray-300 bg-white px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-400"
+              />
+            )}
+          </label>
+          </div>
 
           <div className="mb-4 flex flex-wrap gap-1 rounded-lg border border-gray-300 bg-white p-1 text-sm">
             <button
@@ -156,9 +206,9 @@ export default function QualificationsResults({
           <p className="text-gray-600">
             {checked.length === 0
               ? "This competition only has top N requirements, which depend on who registers and are not listed."
-              : region === WORLD
+              : region === WORLD && competed === ""
                 ? "Nobody meets this requirement yet."
-                : "Nobody from this region meets this requirement yet."}
+                : "Nobody matching these filters meets this requirement yet."}
           </p>
         ) : (
           <>

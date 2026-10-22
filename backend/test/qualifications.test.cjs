@@ -227,7 +227,7 @@ test(
   async () => {
     const service = createQualificationsService(pool);
     // Dan competed for Spain once but is Polish now; 2026GONE01 has no nationality yet.
-    const spain = await service.get("Champs2026", "unique", 1, "Spain");
+    const spain = await service.get("Champs2026", "unique", 1, { region: "Spain" });
     assert.equal(spain.region, "Spain");
     assert.deepEqual(
       spain.qualifiers.map(({ wca_id, events }) => [wca_id, events]),
@@ -246,14 +246,14 @@ test(
       ],
     );
 
-    const europe = await service.get("Champs2026", "333", 1, "_Europe");
+    const europe = await service.get("Champs2026", "333", 1, { region: "_Europe" });
     assert.deepEqual(
       europe.qualifiers.map(({ wca_id }) => wca_id),
       ["2020ADAA01", "2020DANI01", "2020BENB01"],
     );
     assert.equal(europe.unique_count, 4);
 
-    const asia = await service.get("Champs2026", "444", 1, "_Asia");
+    const asia = await service.get("Champs2026", "444", 1, { region: "_Asia" });
     assert.deepEqual(
       asia.qualifiers.map(({ wca_id, result }) => [wca_id, result]),
       [["2020FUMI01", 5000]],
@@ -261,9 +261,53 @@ test(
   },
 );
 
+test(
+  "competed since keeps those with a result at a competition ending on or after the date",
+  { skip: !socket },
+  async () => {
+    const service = createQualificationsService(pool);
+    // Ada qualified in 2025 but has not competed since; Dan's only 2026 result came after the
+    // deadline, which still makes him active.
+    const active = await service.get("Champs2026", "333", 1, { competed_since: "2026-01-01" });
+    assert.equal(active.competed_since, "2026-01-01");
+    assert.deepEqual(
+      active.qualifiers.map(({ wca_id }) => wca_id),
+      ["2020DANI01", "2026GONE01", "2020BENB01"],
+    );
+    assert.deepEqual(
+      active.events.map(({ event_id, count }) => [event_id, count]),
+      [
+        ["333", 3],
+        ["444", 0],
+        ["333bf", null],
+      ],
+    );
+    assert.equal(active.unique_count, 3);
+
+    // Edge2026 ends on 2026-06-01, so a day later only Late2026 counts; Spain then leaves Ben.
+    const late = await service.getCustom("333:average:1000", "2026-06-01", "unique", 1, {
+      region: "Spain",
+      competed_since: "2026-06-02",
+    });
+    assert.deepEqual(
+      late.qualifiers.map(({ wca_id }) => wca_id),
+      ["2020BENB01"],
+    );
+  },
+);
+
+test("a malformed competed-since date is rejected", { skip: !socket }, async () => {
+  await assert.rejects(
+    createQualificationsService(pool).get("Champs2026", "unique", 1, {
+      competed_since: "this year",
+    }),
+    QualificationInputError,
+  );
+});
+
 test("an unknown region is rejected", { skip: !socket }, async () => {
   await assert.rejects(
-    createQualificationsService(pool).get("Champs2026", "unique", 1, "Atlantis"),
+    createQualificationsService(pool).get("Champs2026", "unique", 1, { region: "Atlantis" }),
     QualificationInputError,
   );
 });
@@ -348,7 +392,7 @@ test("custom requirements filter by region too", { skip: !socket }, async () => 
     "2026-06-01",
     "unique",
     1,
-    "Spain",
+    { region: "Spain" },
   );
   assert.deepEqual(
     result.qualifiers.map(({ wca_id }) => wca_id),

@@ -61,6 +61,7 @@ export interface QualificationsResult {
   events: EventRequirement[];
   unique_count: number;
   region: string;
+  competed_since: string | null;
   list: string;
   page: number;
   page_size: number;
@@ -177,4 +178,42 @@ export function decodeCustom(spec: string): CustomRequirement[] {
       resultType: resultType as ResultType,
       level: level === "any" ? null : Number(level),
     }));
+}
+
+/**
+ * The competed-since filter as the URL and saved views keep it: a preset that stays relative to
+ * today, or a fixed date. "this-year" saved in one year still means the current one in the next.
+ */
+export const COMPETED_PRESETS = [
+  { id: "this-year", label: "This year" },
+  { id: "12-months", label: "In the last 12 months" },
+  { id: "24-months", label: "In the last 2 years" },
+] as const;
+
+const isoDay = (date: Date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+
+/** The date a competed filter starts from, or null for any time or something unreadable. */
+export function competedSinceDate(competed: string, today = new Date()): string | null {
+  if (competed === "this-year") return `${today.getFullYear()}-01-01`;
+  const months = { "12-months": 12, "24-months": 24 }[competed];
+  if (months) {
+    const since = new Date(today);
+    since.setMonth(since.getMonth() - months);
+    return isoDay(since);
+  }
+  return /^\d{4}-\d{2}-\d{2}$/.test(competed) ? competed : null;
+}
+
+/**
+ * The parameters that make up a view: which requirements, and how they are filtered. The list
+ * and page being looked at are not part of it, so a view opens on its unique list.
+ */
+export function viewParams(searchParams: URLSearchParams): string {
+  const params = new URLSearchParams();
+  for (const key of ["mode", "competition_id", "requirements", "deadline", "region", "competed"]) {
+    const value = searchParams.get(key);
+    if (value) params.set(key, value);
+  }
+  return params.toString();
 }
