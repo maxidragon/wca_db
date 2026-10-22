@@ -55,3 +55,13 @@ jobs:
     - name: Restart service
       run: pm2 restart wca-db-backend -s || pm2 start dist/index.js --name wca-db-backend -s
       working-directory: ./backend
+    # Deploys do not import. A database whose linkings or best ever ranks are missing gets
+    # them here rather than at the next nightly import; a single query when they exist. After
+    # the restart, because building them takes up to half an hour and the code does not
+    # depend on them.
+    - name: Ensure linkings exist
+      run: ./compute_linkings.sh --if-missing
+      working-directory: ./backend
+    - name: Ensure best ever ranks exist
+      run: ./compute_best_ever_ranks.sh --if-missing
+      working-directory: ./backend

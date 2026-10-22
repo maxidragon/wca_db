@@ -33,6 +33,13 @@ RANKS_SINGLE_PATH="$TMP_DIR/WCA_export_ranks_single.tsv"
 RANKS_AVERAGE_PATH="$TMP_DIR/WCA_export_ranks_average.tsv"
 INDEX_PATH="$TMP_DIR/deferred_indexes.sql"
 
+# The best ever ranks are built into the staging database by the compiled backend. Check for
+# it now rather than after an hour of importing.
+if [ ! -f "$SCRIPT_DIR/dist/compute_best_ever_ranks.js" ]; then
+  echo "dist/compute_best_ever_ranks.js not found, run npm run build first" >&2
+  exit 1
+fi
+
 mkdir -p "$TMP_DIR"
 # Earlier versions of this script expanded the dump to disk and left it there, ~10 GB.
 rm -f "$TMP_DIR"/*.sql
@@ -221,25 +228,35 @@ EOF
 step "Computing statistics entries"
 db "$NEW_DB_NAME" < "$SCRIPT_DIR/statistics_entries.sql"
 
+# Same for the derived tables the relations and best ever ranks pages read. Built after the
+# swap they would be missing from the live database until done, about half an hour.
+step "Computing linkings"
+"$SCRIPT_DIR/compute_linkings.sh" "$NEW_DB_NAME"
+step "Computing best ever ranks"
+"$SCRIPT_DIR/compute_best_ever_ranks.sh" "$NEW_DB_NAME"
+
 step "Swapping the new database in"
 # CREATE IF NOT EXISTS so a first ever run, with no live database to swap out, works too.
 db -e "CREATE DATABASE IF NOT EXISTS $DB_NAME;
        DROP DATABASE IF EXISTS $OLD_DB_NAME;
        CREATE DATABASE $OLD_DB_NAME;"
 
-# One RENAME per database, so neither is ever seen half swapped.
-rename_all() {
-  local from="$1" to="$2" pairs
-  pairs="$(db -Nse "SET SESSION group_concat_max_len = 1048576;
+rename_pairs() {
+  local from="$1" to="$2"
+  db -Nse "SET SESSION group_concat_max_len = 1048576;
     SELECT GROUP_CONCAT(CONCAT('\`$from\`.\`', table_name, '\` TO \`$to\`.\`', table_name, '\`'))
-    FROM information_schema.tables WHERE table_schema = '$from'")"
-  if [ -n "$pairs" ] && [ "$pairs" != "NULL" ]; then
-    db -e "RENAME TABLE $pairs;"
-  fi
+    FROM information_schema.tables WHERE table_schema = '$from'"
 }
 
-rename_all "$DB_NAME" "$OLD_DB_NAME"
-rename_all "$NEW_DB_NAME" "$DB_NAME"
+# One RENAME for both moves, so the live database is never seen empty or half swapped. The
+# pairs run in order: every live table is out of the way before its replacement moves in.
+OLD_PAIRS="$(rename_pairs "$DB_NAME" "$OLD_DB_NAME")"
+NEW_PAIRS="$(rename_pairs "$NEW_DB_NAME" "$DB_NAME")"
+if [ -z "$OLD_PAIRS" ] || [ "$OLD_PAIRS" = "NULL" ]; then
+  db -e "RENAME TABLE $NEW_PAIRS;"
+else
+  db -e "RENAME TABLE $OLD_PAIRS, $NEW_PAIRS;"
+fi
 
 # The previous copy is only useful until the swap succeeds, and it is another ~15 GB.
 db -e "DROP DATABASE $NEW_DB_NAME; DROP DATABASE $OLD_DB_NAME;"
