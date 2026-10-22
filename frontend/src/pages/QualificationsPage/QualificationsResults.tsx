@@ -27,7 +27,7 @@ function PersonLink({ wcaId, name }: { wcaId: string; name: string }) {
  * The region filter, a tab per checked event plus the unique list, and the selected list's page.
  * `current` holds the requirements, which stay while another list or region loads; `shown` is
  * only set once the page for the selected list and region has arrived. Until it has, the page
- * that was there stays in place, dimmed, so switching lists does not empty the page and refill it.
+ * that was there stays as it is, so switching lists does not empty the page and refill it.
  */
 export default function QualificationsResults({
   current,
@@ -57,7 +57,6 @@ export default function QualificationsResults({
   // The table shows the page it was loaded for, which while loading is the previous one, so its
   // columns, numbering and totals follow that page rather than the tab just picked.
   const table = shown ?? (isLoading ? current : null);
-  const stale = table !== null && table !== shown;
   const tableSelected = table?.events.find((event) => event.event_id === table.list) ?? null;
   const total = table
     ? tableSelected
@@ -172,6 +171,9 @@ export default function QualificationsResults({
                 </span>
               </button>
             ))}
+            {isLoading && table && (
+              <span className="ml-auto self-center px-2 text-xs text-gray-500">Loading…</span>
+            )}
           </div>
 
           <div className="mb-6 text-sm text-gray-600">
@@ -210,112 +212,114 @@ export default function QualificationsResults({
       {error && !isLoading && <p className="text-red-500">{error}</p>}
 
       {table && !error && (
-        <div className="relative" aria-busy={stale}>
-          {stale && (
-            <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex justify-center pt-10">
-              <div className="h-6 w-6 animate-spin rounded-full border-4 border-blue-500 border-t-transparent" />
-            </div>
-          )}
-          <div className={`transition-opacity ${stale ? "pointer-events-none opacity-50" : ""}`}>
-            {table.events.length === 0 ? (
-              <p className="text-gray-600">This competition has no qualification requirements.</p>
-            ) : total === 0 ? (
-              <p className="text-gray-600">
-                {checked.length === 0
-                  ? "This competition only has top N requirements, which depend on who registers and are not listed."
-                  : region === WORLD && competed === ""
-                    ? "Nobody meets this requirement yet."
-                    : "Nobody matching these filters meets this requirement yet."}
-              </p>
-            ) : (
-              <>
-                <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-50 text-xs uppercase text-gray-500">
-                      <tr>
-                        <th className="px-4 py-2 text-right">#</th>
-                        <th className="px-4 py-2 text-left">Name</th>
-                        <th className="px-4 py-2 text-left">WCA ID</th>
-                        <th className="px-4 py-2 text-left">Country</th>
-                        {tableSelected ? (
+        <div aria-busy={isLoading}>
+          {table.events.length === 0 ? (
+            <p className="text-gray-600">This competition has no qualification requirements.</p>
+          ) : total === 0 ? (
+            <p className="text-gray-600">
+              {checked.length === 0
+                ? "This competition only has top N requirements, which depend on who registers and are not listed."
+                : region === WORLD && competed === ""
+                  ? "Nobody meets this requirement yet."
+                  : "Nobody matching these filters meets this requirement yet."}
+            </p>
+          ) : (
+            <>
+              <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 text-xs uppercase text-gray-500">
+                    <tr>
+                      <th className="px-4 py-2 text-right">#</th>
+                      <th className="px-4 py-2 text-left">Name</th>
+                      <th className="px-4 py-2 text-left">WCA ID</th>
+                      <th className="px-4 py-2 text-left">Country</th>
+                      {tableSelected ? (
+                        <>
+                          <th className="px-4 py-2 text-right">Result</th>
+                          <th className="px-4 py-2 text-left">Achieved at</th>
+                        </>
+                      ) : (
+                        <th className="px-4 py-2 text-left">Events</th>
+                      )}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {table.qualifiers.map((qualifier, index) => (
+                      <tr key={qualifier.wca_id} className="transition-colors hover:bg-gray-50">
+                        <td className="px-4 py-2 text-right text-gray-500">
+                          {(table.page - 1) * table.page_size + index + 1}
+                        </td>
+                        <td className="px-4 py-2">
+                          <PersonLink wcaId={qualifier.wca_id} name={qualifier.name} />
+                        </td>
+                        <td className="px-4 py-2 font-mono text-gray-600">{qualifier.wca_id}</td>
+                        <td className="px-4 py-2 text-gray-600">{qualifier.country_name ?? "—"}</td>
+                        {tableSelected && "result" in qualifier ? (
                           <>
-                            <th className="px-4 py-2 text-right">Result</th>
-                            <th className="px-4 py-2 text-left">Achieved at</th>
+                            <td className="px-4 py-2 text-right font-mono">
+                              {formatResult(
+                                qualifier.result,
+                                tableSelected.event_id,
+                                tableSelected.requirement.result_type,
+                              )}
+                            </td>
+                            <td className="px-4 py-2">
+                              <a
+                                href={`${WCA_ORIGIN}/competitions/${qualifier.competition_id}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-blue-600 hover:underline"
+                              >
+                                {qualifier.competition_name}
+                              </a>
+                            </td>
                           </>
                         ) : (
-                          <th className="px-4 py-2 text-left">Events</th>
+                          // One line like every event list's rows, so switching between them
+                          // keeps the table's height; the full list is on hover.
+                          <td
+                            className="max-w-md truncate px-4 py-2 text-gray-600"
+                            title={
+                              "events" in qualifier
+                                ? qualifier.events.map((event) => eventNames.get(event) ?? event).join(", ")
+                                : undefined
+                            }
+                          >
+                            {"events" in qualifier &&
+                              `${qualifier.events.length} · ${qualifier.events
+                                .map((event) => eventNames.get(event) ?? event)
+                                .join(", ")}`}
+                          </td>
                         )}
                       </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {table.qualifiers.map((qualifier, index) => (
-                        <tr key={qualifier.wca_id} className="transition-colors hover:bg-gray-50">
-                          <td className="px-4 py-2 text-right text-gray-500">
-                            {(table.page - 1) * table.page_size + index + 1}
-                          </td>
-                          <td className="px-4 py-2">
-                            <PersonLink wcaId={qualifier.wca_id} name={qualifier.name} />
-                          </td>
-                          <td className="px-4 py-2 font-mono text-gray-600">{qualifier.wca_id}</td>
-                          <td className="px-4 py-2 text-gray-600">{qualifier.country_name ?? "—"}</td>
-                          {tableSelected && "result" in qualifier ? (
-                            <>
-                              <td className="px-4 py-2 text-right font-mono">
-                                {formatResult(
-                                  qualifier.result,
-                                  tableSelected.event_id,
-                                  tableSelected.requirement.result_type,
-                                )}
-                              </td>
-                              <td className="px-4 py-2">
-                                <a
-                                  href={`${WCA_ORIGIN}/competitions/${qualifier.competition_id}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-blue-600 hover:underline"
-                                >
-                                  {qualifier.competition_name}
-                                </a>
-                              </td>
-                            </>
-                          ) : (
-                            <td className="px-4 py-2 text-gray-600">
-                              {"events" in qualifier &&
-                                `${qualifier.events.length} · ${qualifier.events
-                                  .map((event) => eventNames.get(event) ?? event)
-                                  .join(", ")}`}
-                            </td>
-                          )}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-gray-600">
+                <span>
+                  {total.toLocaleString()} {tableSelected ? "qualifiers" : "unique competitors"} · Page{" "}
+                  {table.page} of {pages}
+                </span>
+                <div className="flex gap-2">
+                  <button
+                    disabled={table.page <= 1}
+                    onClick={() => update({ page: String(table.page - 1) })}
+                    className="cursor-pointer rounded border border-gray-300 bg-white px-3 py-2 disabled:opacity-40"
+                  >
+                    Previous
+                  </button>
+                  <button
+                    disabled={table.page >= pages}
+                    onClick={() => update({ page: String(table.page + 1) })}
+                    className="cursor-pointer rounded border border-gray-300 bg-white px-3 py-2 disabled:opacity-40"
+                  >
+                    Next
+                  </button>
                 </div>
-                <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-gray-600">
-                  <span>
-                    {total.toLocaleString()} {tableSelected ? "qualifiers" : "unique competitors"} · Page{" "}
-                    {table.page} of {pages}
-                  </span>
-                  <div className="flex gap-2">
-                    <button
-                      disabled={table.page <= 1}
-                      onClick={() => update({ page: String(table.page - 1) })}
-                      className="cursor-pointer rounded border border-gray-300 bg-white px-3 py-2 disabled:opacity-40"
-                    >
-                      Previous
-                    </button>
-                    <button
-                      disabled={table.page >= pages}
-                      onClick={() => update({ page: String(table.page + 1) })}
-                      className="cursor-pointer rounded border border-gray-300 bg-white px-3 py-2 disabled:opacity-40"
-                    >
-                      Next
-                    </button>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
+              </div>
+            </>
+          )}
         </div>
       )}
     </>

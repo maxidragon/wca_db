@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { backendRequest } from "../../utils/request";
 import { formatDate } from "../../utils/results";
@@ -21,6 +21,20 @@ import {
 
 const WCA_ORIGIN = "https://www.worldcubeassociation.org";
 const CUSTOM_MODE = "custom";
+// Pages already seen or fetched ahead; enough for every tab of a few competitions and filters.
+const CACHED_PAGES = 200;
+
+function pageUrl(
+  source: string,
+  list: string,
+  region: string,
+  competedSince: string | null,
+  page: number,
+): string {
+  return `${source}&list=${encodeURIComponent(list)}&region=${encodeURIComponent(region)}${
+    competedSince ? `&competed_since=${competedSince}` : ""
+  }&page=${page}`;
+}
 
 const QualificationsPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -49,6 +63,14 @@ const QualificationsPage = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [regions, setRegions] = useState<Region[]>([]);
   const [events, setEvents] = useState<EventOption[]>([]);
+  const pages = useRef(new Map<string, QualificationsResult>());
+  const remember = (url: string, data: QualificationsResult) => {
+    pages.current.delete(url);
+    pages.current.set(url, data);
+    while (pages.current.size > CACHED_PAGES) {
+      pages.current.delete(pages.current.keys().next().value!);
+    }
+  };
 
   // The statistics already name every region and current event, the same way these filters do.
   useEffect(() => {
@@ -67,11 +89,19 @@ const QualificationsPage = () => {
   }, []);
 
   // The lists follow the URL, so a shared link, the selected list and the page all load what
-  // they name.
+  // they name. A page seen before, or fetched ahead, is shown at once.
   useEffect(() => {
     if (!source) {
       setResult(null);
       setError(null);
+      return;
+    }
+    const url = pageUrl(source, list, region, competedSince, page);
+    const cached = pages.current.get(url);
+    if (cached) {
+      setResult({ source, data: cached });
+      setError(null);
+      setIsLoading(false);
       return;
     }
     const request = new AbortController();
@@ -79,17 +109,12 @@ const QualificationsPage = () => {
     setIsLoading(true);
     (async () => {
       try {
-        const res = await backendRequest(
-          `${source}&list=${encodeURIComponent(list)}&region=${encodeURIComponent(region)}${
-            competedSince ? `&competed_since=${competedSince}` : ""
-          }&page=${page}`,
-          "GET",
-          true,
-          undefined,
-          request.signal,
-        );
+        const res = await backendRequest(url, "GET", true, undefined, request.signal);
         const data = await res.json();
-        if (res.ok) setResult({ source, data });
+        if (res.ok) {
+          remember(url, data);
+          setResult({ source, data });
+        }
         else {
           setResult(null);
           setError(data.error || "Unknown error");
@@ -132,6 +157,30 @@ const QualificationsPage = () => {
     current.competed_since === competedSince
       ? current
       : null;
+
+  // Once a competition or set has loaded, the first page of every other tab is fetched ahead,
+  // one at a time, so switching tabs swaps the list in one step instead of waiting on it.
+  const tabs = current
+    ? [UNIQUE_LIST, ...current.events.filter((e) => e.count !== null).map((e) => e.event_id)].join(",")
+    : "";
+  useEffect(() => {
+    if (!source || !tabs) return;
+    const request = new AbortController();
+    (async () => {
+      for (const tab of tabs.split(",")) {
+        const url = pageUrl(source, tab, region, competedSince, 1);
+        if (pages.current.has(url)) continue;
+        try {
+          const res = await backendRequest(url, "GET", true, undefined, request.signal);
+          if (res.ok) remember(url, await res.json());
+        } catch {
+          // Fetching ahead is best effort; the tab loads when picked.
+        }
+        if (request.signal.aborted) return;
+      }
+    })();
+    return () => request.abort();
+  }, [source, tabs, region, competedSince]);
 
   // A saved view is named after what it shows; the name can be changed right after saving.
   const viewName = () => {
