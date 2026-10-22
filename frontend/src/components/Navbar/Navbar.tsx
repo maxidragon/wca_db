@@ -15,6 +15,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Best Ever Ranks", to: "/best-ever-ranks" },
   { label: "Person", to: "/person" },
   { label: "Nemeses", to: "/nemeses" },
+  { label: "Qualifications", to: "/qualifications" },
   { label: "Statistics", to: "/statistics" },
 ];
 

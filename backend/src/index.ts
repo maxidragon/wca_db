@@ -12,6 +12,12 @@ import { bestEverRanksReady, getBestEverRanks } from "./best_ever_ranks";
 import { getPersonProfile } from "./person";
 import { getNemeses, NEMESIS_REGIONS, type NemesisRegion } from "./nemeses";
 import {
+  createQualificationsService,
+  QualificationInputError,
+  qualificationIndexesReady,
+  UNIQUE_LIST,
+} from "./qualifications";
+import {
   createStatisticsService,
   StatisticsInputError,
   statisticsEntriesReady,
@@ -46,6 +52,7 @@ const pool = mysql.createPool({
   connectionLimit: 10,
 });
 const statisticsService = createStatisticsService(pool);
+const qualificationsService = createQualificationsService(pool);
 
 app.get("/api/statistics/options", ensureAuthenticated, async (_req: Request, res: Response) => {
   try {
@@ -382,9 +389,43 @@ app.get("/api/competitions/search", ensureAuthenticated, async (req: Request, re
     return res.status(400).json({ error: "Search must be between 2 and 100 characters" });
   }
   try {
-    res.json({ competitions: await searchCompetitions(pool, query) });
+    const withQualifications = req.query.with_qualifications === "1";
+    res.json({ competitions: await searchCompetitions(pool, query, withQualifications) });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/qualifications", ensureAuthenticated, async (req: Request, res: Response) => {
+  const competitionId = ((req.query.competition_id as string) || "").trim();
+  const list = ((req.query.list as string) || UNIQUE_LIST).trim();
+  const page = req.query.page === undefined ? 1 : Number(req.query.page);
+
+  if (!competitionId || competitionId.length > 32) {
+    return res.status(400).json({ error: "A valid competition_id is required" });
+  }
+  if (!Number.isInteger(page) || page < 1) {
+    return res.status(400).json({ error: "page must be a positive integer" });
+  }
+
+  try {
+    if (!(await qualificationIndexesReady(pool))) {
+      return res.status(503).json({
+        error: "Qualification indexes not yet built. Run backend/qualification_indexes.sql.",
+      });
+    }
+    const qualifications = await qualificationsService.get(competitionId, list, page);
+    if (!qualifications) {
+      return res.status(404).json({ error: "Competition not found" });
+    }
+    res.json(qualifications);
+  } catch (err: unknown) {
+    if (err instanceof QualificationInputError) return res.status(400).json({ error: err.message });
+    if (isQueryTimeout(err)) {
+      return res.status(408).json({ error: "Qualifications took too long to compute. Please try again later." });
+    }
+    console.error("Qualifications query failed", err);
+    res.status(500).json({ error: "Could not load the qualifications" });
   }
 });
 
