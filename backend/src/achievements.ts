@@ -102,7 +102,11 @@ function rosterSql(projected: boolean): string {
   `;
 }
 
-export async function searchCompetitions(pool: Pool, query: string) {
+const QUALIFICATIONS_EXIST = `AND EXISTS (SELECT 1 FROM competition_events ce
+                                          WHERE ce.competition_id = competitions.id
+                                            AND ce.qualification IS NOT NULL)`;
+
+export async function searchCompetitions(pool: Pool, query: string, withQualifications = false) {
   const term = query.trim();
   const like = `%${term}%`;
   const prefix = `${term}%`;
@@ -113,6 +117,7 @@ export async function searchCompetitions(pool: Pool, query: string) {
             country_id
      FROM competitions
      WHERE announced_at IS NOT NULL AND (id LIKE ? OR name LIKE ?)
+       ${withQualifications ? QUALIFICATIONS_EXIST : ""}
      ORDER BY
        CASE WHEN id = ? THEN 0 WHEN id LIKE ? THEN 1 WHEN name LIKE ? THEN 2 ELSE 3 END,
        ABS(DATEDIFF(start_date, CURDATE())), start_date DESC

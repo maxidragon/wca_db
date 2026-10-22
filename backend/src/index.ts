@@ -12,6 +12,13 @@ import { bestEverRanksReady, getBestEverRanks } from "./best_ever_ranks";
 import { getPersonProfile } from "./person";
 import { getNemeses, NEMESIS_REGIONS, type NemesisRegion } from "./nemeses";
 import {
+  createQualificationsService,
+  QualificationInputError,
+  qualificationIndexesReady,
+  UNIQUE_LIST,
+  WORLD,
+} from "./qualifications";
+import {
   createStatisticsService,
   StatisticsInputError,
   statisticsEntriesReady,
@@ -46,6 +53,7 @@ const pool = mysql.createPool({
   connectionLimit: 10,
 });
 const statisticsService = createStatisticsService(pool);
+const qualificationsService = createQualificationsService(pool);
 
 app.get("/api/statistics/options", ensureAuthenticated, async (_req: Request, res: Response) => {
   try {
@@ -382,10 +390,96 @@ app.get("/api/competitions/search", ensureAuthenticated, async (req: Request, re
     return res.status(400).json({ error: "Search must be between 2 and 100 characters" });
   }
   try {
-    res.json({ competitions: await searchCompetitions(pool, query) });
+    const withQualifications = req.query.with_qualifications === "1";
+    res.json({ competitions: await searchCompetitions(pool, query, withQualifications) });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
+});
+
+/**
+ * The logged-in competitor's WCA ID. Tokens from a login carry it; older tokens only carry the
+ * WCA account, which the dump's users table maps to it. Null for an account without one.
+ */
+async function viewerWcaId(req: Request): Promise<string | null> {
+  const user = (req as any).user ?? {};
+  if ("wcaId" in user) return user.wcaId || null;
+  if (!user.wcaUserId) return null;
+  const [[row]] = await pool.query<RowDataPacket[]>(
+    "SELECT wca_id FROM users WHERE id = ? LIMIT 1",
+    [user.wcaUserId]
+  );
+  return row?.wca_id || null;
+}
+
+function qualificationQuery(req: Request) {
+  return {
+    list: ((req.query.list as string) || UNIQUE_LIST).trim(),
+    filters: {
+      region: ((req.query.region as string) || WORLD).trim(),
+      competed_since: ((req.query.competed_since as string) || "").trim() || null,
+    },
+    page: req.query.page === undefined ? 1 : Number(req.query.page),
+  };
+}
+
+async function sendQualifications(res: Response, load: () => Promise<unknown | null>) {
+  try {
+    if (!(await qualificationIndexesReady(pool))) {
+      return res.status(503).json({
+        error: "Qualification indexes not yet built. Run backend/qualification_indexes.sql.",
+      });
+    }
+    const qualifications = await load();
+    if (!qualifications) {
+      return res.status(404).json({ error: "Competition not found" });
+    }
+    res.json(qualifications);
+  } catch (err: unknown) {
+    if (err instanceof QualificationInputError) return res.status(400).json({ error: err.message });
+    if (isQueryTimeout(err)) {
+      return res.status(408).json({ error: "Qualifications took too long to compute. Please try again later." });
+    }
+    console.error("Qualifications query failed", err);
+    res.status(500).json({ error: "Could not load the qualifications" });
+  }
+}
+
+app.get("/api/qualifications", ensureAuthenticated, async (req: Request, res: Response) => {
+  const competitionId = ((req.query.competition_id as string) || "").trim();
+  const { list, filters, page } = qualificationQuery(req);
+
+  if (!competitionId || competitionId.length > 32) {
+    return res.status(400).json({ error: "A valid competition_id is required" });
+  }
+  if (!Number.isInteger(page) || page < 1) {
+    return res.status(400).json({ error: "page must be a positive integer" });
+  }
+  await sendQualifications(res, async () =>
+    qualificationsService.get(competitionId, list, page, {
+      ...filters,
+      viewer: await viewerWcaId(req),
+    })
+  );
+});
+
+app.get("/api/qualifications/custom", ensureAuthenticated, async (req: Request, res: Response) => {
+  const requirements = ((req.query.requirements as string) || "").trim();
+  const deadline = ((req.query.deadline as string) || "").trim() || null;
+  const { list, filters, page } = qualificationQuery(req);
+
+  if (!requirements || requirements.length > 1000) {
+    return res.status(400).json({ error: "requirements are required" });
+  }
+  if (!Number.isInteger(page) || page < 1) {
+    return res.status(400).json({ error: "page must be a positive integer" });
+  }
+  await sendQualifications(res, async () =>
+    qualificationsService.getCustom(requirements, deadline, list, page, {
+      ...filters,
+      viewer: await viewerWcaId(req),
+    })
+  );
 });
 
 app.get("/api/achievements", ensureAuthenticated, async (req: Request, res: Response) => {
