@@ -16,6 +16,7 @@ import {
   QualificationInputError,
   qualificationIndexesReady,
   UNIQUE_LIST,
+  WORLD,
 } from "./qualifications";
 import {
   createStatisticsService,
@@ -399,6 +400,7 @@ app.get("/api/competitions/search", ensureAuthenticated, async (req: Request, re
 app.get("/api/qualifications", ensureAuthenticated, async (req: Request, res: Response) => {
   const competitionId = ((req.query.competition_id as string) || "").trim();
   const list = ((req.query.list as string) || UNIQUE_LIST).trim();
+  const region = ((req.query.region as string) || WORLD).trim();
   const page = req.query.page === undefined ? 1 : Number(req.query.page);
 
   if (!competitionId || competitionId.length > 32) {
@@ -414,7 +416,7 @@ app.get("/api/qualifications", ensureAuthenticated, async (req: Request, res: Re
         error: "Qualification indexes not yet built. Run backend/qualification_indexes.sql.",
       });
     }
-    const qualifications = await qualificationsService.get(competitionId, list, page);
+    const qualifications = await qualificationsService.get(competitionId, list, page, region);
     if (!qualifications) {
       return res.status(404).json({ error: "Competition not found" });
     }

@@ -4,6 +4,7 @@ export class QualificationInputError extends Error {}
 
 export const QUALIFIERS_PAGE_SIZE = 100;
 export const UNIQUE_LIST = "unique";
+export const WORLD = "World";
 
 // A lenient requirement in a popular event is met by a couple of hundred thousand competitors,
 // which takes the covering index a few seconds; a stalled one must still free its connection.
@@ -66,6 +67,8 @@ export interface QualificationsResult {
   events: EventRequirement[];
   /** Competitors who meet at least one checked requirement. */
   unique_count: number;
+  /** World, a continent or a country id, matched against current nationality. */
+  region: string;
   list: string;
   page: number;
   page_size: number;
@@ -94,7 +97,18 @@ interface QualifierRow extends RowDataPacket {
 interface NameRow extends RowDataPacket {
   wca_id: string;
   name: string;
+  country_id: string;
+  continent_id: string | null;
 }
+
+interface RegionRow extends RowDataPacket {
+  kind: "continent" | "country";
+}
+
+/** Which competitors a list keeps: everyone, or those currently from a continent or country. */
+type Region =
+  | { kind: "world" }
+  | { kind: "continent" | "country"; id: string };
 
 interface CompetitorRow extends RowDataPacket {
   wca_id: string;
@@ -118,6 +132,8 @@ interface ComputedQualifications {
   lists: Map<string, { persons: string[]; values: Int32Array }>;
   /** Everyone who meets a checked requirement, by events met and then name. */
   unique: { persons: string[]; events: string[][] };
+  /** Current nationality of every listed competitor the persons table has. */
+  nationality: Map<string, { country_id: string; continent_id: string | null }>;
 }
 
 /**
@@ -254,14 +270,30 @@ async function computeQualifications(
     return rows.map((row) => ({ person_id: intern(row.person_id), value: Number(row.value) }));
   });
 
-  // Names order the lists. Reading every current name once is cheaper than joining them to a
-  // few hundred thousand grouped rows per event, and they are dropped once sorted.
+  // Names order the lists and nationality filters them by region. Reading every current
+  // competitor once is cheaper than joining them to a few hundred thousand grouped rows per
+  // event; the names are dropped once sorted, and the few distinct regions are shared.
   const names = new Map<string, string>();
+  const nationality = new Map<string, { country_id: string; continent_id: string | null }>();
+  const regions = new Map<string, { country_id: string; continent_id: string | null }>();
   if (interned.size > 0) {
     const [nameRows] = await pool.query<NameRow[]>(
-      "SELECT wca_id, name FROM persons WHERE sub_id = 1",
+      `SELECT p.wca_id, p.name, p.country_id, co.continent_id
+       FROM persons p
+       LEFT JOIN countries co ON co.id = p.country_id
+       WHERE p.sub_id = 1`,
     );
-    for (const row of nameRows) if (interned.has(row.wca_id)) names.set(row.wca_id, row.name);
+    for (const row of nameRows) {
+      const person = interned.get(row.wca_id);
+      if (!person) continue;
+      names.set(person, row.name);
+      let region = regions.get(row.country_id);
+      if (!region) {
+        region = { country_id: row.country_id, continent_id: row.continent_id };
+        regions.set(row.country_id, region);
+      }
+      nationality.set(person, region);
+    }
   }
   const byName = (a: string, b: string) =>
     (names.get(a) ?? a).localeCompare(names.get(b) ?? b) || a.localeCompare(b);
@@ -305,7 +337,34 @@ async function computeQualifications(
       persons: uniquePersons,
       events: uniquePersons.map((person) => metBy.get(person)!),
     },
+    nationality,
   };
+}
+
+/**
+ * Reads a region the way the statistics name them: World, a continent id or a country id.
+ * Returns null for anything else.
+ */
+async function resolveRegion(pool: Pool, id: string): Promise<Region | null> {
+  if (id === WORLD) return { kind: "world" };
+  const [[row]] = await pool.query<RegionRow[]>(
+    `SELECT 'continent' AS kind FROM continents WHERE id = ?
+     UNION ALL
+     SELECT 'country' AS kind FROM countries WHERE id = ?
+     LIMIT 1`,
+    [id, id],
+  );
+  return row ? { kind: row.kind, id } : null;
+}
+
+/**
+ * Whether a competitor belongs to the region by their current nationality. Someone the persons
+ * table does not have yet has no nationality, so they are only listed for the world.
+ */
+function regionFilter(computed: ComputedQualifications, region: Region) {
+  if (region.kind === "world") return () => true;
+  const key = region.kind === "continent" ? "continent_id" : "country_id";
+  return (person: string) => computed.nationality.get(person)?.[key] === region.id;
 }
 
 async function competitors(pool: Pool, ids: string[]): Promise<Map<string, Competitor>> {
@@ -366,39 +425,71 @@ async function achievedAt(
   return achieved;
 }
 
+/** Positions in a list of the competitors who belong to the region, in list order. */
+function positionsIn(persons: string[], inRegion: (person: string) => boolean): number[] {
+  const positions: number[] = [];
+  persons.forEach((person, index) => {
+    if (inRegion(person)) positions.push(index);
+  });
+  return positions;
+}
+
+/**
+ * One page of a list for a region. The cached lists hold the world, so a region filters them
+ * here: a few hundred thousand map lookups per list, milliseconds next to computing them.
+ */
 async function servePage(
   pool: Pool,
   computed: ComputedQualifications,
   list: string,
   page: number,
+  regionId: string,
+  region: Region,
 ): Promise<QualificationsResult> {
   const start = (page - 1) * QUALIFIERS_PAGE_SIZE;
   const end = start + QUALIFIERS_PAGE_SIZE;
+  const inRegion = regionFilter(computed, region);
+  const world = region.kind === "world";
+  const unique = world ? null : positionsIn(computed.unique.persons, inRegion);
   const base = {
     competition: computed.competition,
-    events: computed.events,
-    unique_count: computed.unique.persons.length,
+    events: computed.events.map((event) => {
+      const qualifiers = computed.lists.get(event.event_id);
+      if (!qualifiers || world) return event;
+      return { ...event, count: qualifiers.persons.filter(inRegion).length };
+    }),
+    unique_count: unique ? unique.length : computed.unique.persons.length,
+    region: regionId,
     list,
     page,
     page_size: QUALIFIERS_PAGE_SIZE,
   };
 
   if (list === UNIQUE_LIST) {
-    const persons = computed.unique.persons.slice(start, end);
+    const positions = (unique ?? computed.unique.persons.map((_, index) => index)).slice(
+      start,
+      end,
+    );
+    const persons = positions.map((position) => computed.unique.persons[position]);
     const details = await competitors(pool, persons);
     return {
       ...base,
       qualifiers: persons.map((person, index) => ({
         ...details.get(person)!,
-        events: computed.unique.events[start + index],
+        events: computed.unique.events[positions[index]],
       })),
     };
   }
 
   const qualifiers = computed.lists.get(list)!;
   const requirement = computed.events.find((event) => event.event_id === list)!.requirement;
-  const persons = qualifiers.persons.slice(start, end);
-  const values = Array.from(qualifiers.values.subarray(start, end));
+  const positions = (
+    world
+      ? qualifiers.persons.map((_, index) => index)
+      : positionsIn(qualifiers.persons, inRegion)
+  ).slice(start, end);
+  const persons = positions.map((position) => qualifiers.persons[position]);
+  const values = positions.map((position) => qualifiers.values[position]);
   const [details, achieved] = await Promise.all([
     competitors(pool, persons),
     achievedAt(pool, list, requirement, persons, values),
@@ -462,7 +553,11 @@ export function createQualificationsService(pool: Pool) {
   };
 
   return {
-    async get(competitionId: string, list: string, page: number) {
+    async get(competitionId: string, list: string, page: number, regionId: string = WORLD) {
+      const region = await resolveRegion(pool, regionId);
+      if (!region) {
+        throw new QualificationInputError("region must be World, a continent or a country");
+      }
       const result = await computed(competitionId);
       if (!result) return null;
       if (list !== UNIQUE_LIST && !result.lists.has(list)) {
@@ -470,7 +565,7 @@ export function createQualificationsService(pool: Pool) {
           "list must be unique or an event with a checked requirement at this competition",
         );
       }
-      return servePage(pool, result, list, page);
+      return servePage(pool, result, list, page, regionId, region);
     },
   };
 }

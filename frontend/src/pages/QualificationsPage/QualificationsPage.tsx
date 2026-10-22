@@ -5,6 +5,13 @@ import { formatDate, formatResult } from "../../utils/results";
 
 const WCA_ORIGIN = "https://www.worldcubeassociation.org";
 const UNIQUE_LIST = "unique";
+const WORLD = "World";
+
+interface Region {
+  id: string;
+  name: string;
+  kind: string;
+}
 
 interface Competition {
   id: string;
@@ -49,6 +56,7 @@ interface QualificationsResult {
   competition: Competition;
   events: EventRequirement[];
   unique_count: number;
+  region: string;
   list: string;
   page: number;
   page_size: number;
@@ -92,6 +100,7 @@ const QualificationsPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const competitionId = (searchParams.get("competition_id") || "").trim();
   const list = searchParams.get("list") || UNIQUE_LIST;
+  const region = searchParams.get("region") || WORLD;
   const page = Math.max(1, Number(searchParams.get("page")) || 1);
   const [query, setQuery] = useState(competitionId);
   const [suggestions, setSuggestions] = useState<Competition[]>([]);
@@ -100,7 +109,20 @@ const QualificationsPage = () => {
   const [result, setResult] = useState<QualificationsResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [regions, setRegions] = useState<Region[]>([]);
   const searchVersion = useRef(0);
+
+  // The statistics already name every region the export has, the same way this filter does.
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await backendRequest("api/statistics/options", "GET", true);
+        if (res.ok) setRegions((await res.json()).regions);
+      } catch {
+        // Without the list the filter offers only the world, which still works.
+      }
+    })();
+  }, []);
 
   // The lists follow the URL, so a shared link, the selected list and the page all load what
   // they name.
@@ -116,7 +138,7 @@ const QualificationsPage = () => {
     (async () => {
       try {
         const res = await backendRequest(
-          `api/qualifications?competition_id=${encodeURIComponent(competitionId)}&list=${encodeURIComponent(list)}&page=${page}`,
+          `api/qualifications?competition_id=${encodeURIComponent(competitionId)}&list=${encodeURIComponent(list)}&region=${encodeURIComponent(region)}&page=${page}`,
           "GET",
           true,
           undefined,
@@ -140,7 +162,7 @@ const QualificationsPage = () => {
       }
     })();
     return () => request.abort();
-  }, [competitionId, list, page]);
+  }, [competitionId, list, region, page]);
 
   useEffect(() => {
     const trimmed = query.trim();
@@ -184,7 +206,8 @@ const QualificationsPage = () => {
   const selectCompetition = (id: string) => {
     setSuggestions([]);
     setSearchOpen(false);
-    setSearchParams({ competition_id: id });
+    // The region usually outlives the competition: a national team checks one after another.
+    setSearchParams(region === WORLD ? { competition_id: id } : { competition_id: id, region });
   };
 
   const submitSearch = (event: React.FormEvent) => {
@@ -202,7 +225,7 @@ const QualificationsPage = () => {
   // The requirements belong to the competition, not the list, so they stay while a list loads.
   const current =
     result && result.competition.id.toLowerCase() === competitionId.toLowerCase() ? result : null;
-  const shown = current && current.list === list ? current : null;
+  const shown = current && current.list === list && current.region === region ? current : null;
   const checked = current ? current.events.filter((event) => event.count !== null) : [];
   const unchecked = current ? current.events.filter((event) => event.count === null) : [];
   const selected = current?.events.find((event) => event.event_id === list) ?? null;
@@ -287,6 +310,32 @@ const QualificationsPage = () => {
 
       {current && current.events.length > 0 && (
         <>
+          <label className="mb-3 flex items-center gap-2 text-sm font-medium text-gray-700">
+            Region
+            <select
+              aria-label="Region"
+              value={region}
+              onChange={(e) =>
+                update({ region: e.target.value === WORLD ? null : e.target.value, page: null })
+              }
+              className="rounded border border-gray-300 bg-white px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-400"
+            >
+              <option value={WORLD}>World</option>
+              {(["continent", "country"] as const).map((kind) => (
+                <optgroup key={kind} label={kind === "continent" ? "Continents" : "Countries"}>
+                  {regions
+                    .filter((r) => r.kind === kind)
+                    .map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.name}
+                      </option>
+                    ))}
+                </optgroup>
+              ))}
+            </select>
+            <span className="font-normal text-gray-500">by current nationality</span>
+          </label>
+
           <div className="mb-4 flex flex-wrap gap-1 rounded-lg border border-gray-300 bg-white p-1 text-sm">
             <button
               type="button"
@@ -353,7 +402,9 @@ const QualificationsPage = () => {
           <p className="text-gray-600">
             {checked.length === 0
               ? "This competition only has ranking requirements, which are not listed."
-              : "Nobody meets this requirement yet."}
+              : region === WORLD
+                ? "Nobody meets this requirement yet."
+                : "Nobody from this region meets this requirement yet."}
           </p>
         ) : (
           <>

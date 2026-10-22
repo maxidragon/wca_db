@@ -30,7 +30,8 @@ before(async () => {
     multipleStatements: true,
   });
   for (const sql of [
-    "CREATE TABLE countries (id VARCHAR(30) PRIMARY KEY,name VARCHAR(40))",
+    "CREATE TABLE continents (id VARCHAR(30) PRIMARY KEY,name VARCHAR(40))",
+    "CREATE TABLE countries (id VARCHAR(30) PRIMARY KEY,name VARCHAR(40),continent_id VARCHAR(30))",
     "CREATE TABLE persons (wca_id VARCHAR(10),sub_id INT,name VARCHAR(40),country_id VARCHAR(30),PRIMARY KEY(wca_id,sub_id))",
     "CREATE TABLE events (id VARCHAR(6) PRIMARY KEY,name VARCHAR(54),`rank` INT)",
     "CREATE TABLE competitions (id VARCHAR(32) PRIMARY KEY,name VARCHAR(50),start_date DATE,end_date DATE,country_id VARCHAR(30))",
@@ -38,12 +39,14 @@ before(async () => {
     "CREATE TABLE results (id INT AUTO_INCREMENT PRIMARY KEY,competition_id VARCHAR(32),event_id VARCHAR(6),person_id VARCHAR(10),best INT,average INT)",
     "CREATE TABLE wca_statistics_metadata (field VARCHAR(255),value VARCHAR(255))",
     "INSERT INTO wca_statistics_metadata VALUES ('export_timestamp','2026-07-01T00:00:00Z')",
-    "INSERT INTO countries VALUES ('Poland','Poland'),('Spain','Spain')",
+    "INSERT INTO continents VALUES ('_Europe','Europe'),('_Asia','Asia')",
+    "INSERT INTO countries VALUES ('Poland','Poland','_Europe'),('Spain','Spain','_Europe'),('Japan','Japan','_Asia')",
     `INSERT INTO persons VALUES
        ('2020ADAA01',1,'Ada','Poland'),
        ('2020BENB01',1,'Ben','Spain'),
        ('2020CAOC01',1,'Cao','Spain'),
        ('2020DANI01',1,'Dan','Poland'),('2020DANI01',2,'Daniel','Spain'),
+       ('2020FUMI01',1,'Fumi','Japan'),
        ('2020EVAE01',1,'Eva','Poland')`,
     "INSERT INTO events VALUES ('333','3x3x3 Cube',10),('444','4x4x4 Cube',30),('333bf','3x3x3 Blindfolded',70),('333mbf','3x3x3 Multi-Blind',110)",
     // The deadline is 2026-06-01: Late ends after it, Edge on it, and Early well before.
@@ -79,7 +82,8 @@ before(async () => {
        ('Early2025','444','2020EVAE01',-1,0),
        ('Late2026','444','2020BENB01',3900,0),
        ('Again2025','444','2020ADAA01',3500,3700),
-       ('Early2025','333bf','2020ADAA01',3000,0)`,
+       ('Early2025','333bf','2020ADAA01',3000,0),
+       ('Again2025','444','2020FUMI01',5000,5200)`,
   ])
     await pool.query(sql);
   // The indexes the import builds, from the file it builds them with.
@@ -169,6 +173,7 @@ test(
       [
         ["2020ADAA01", 3500],
         ["2020CAOC01", 4000],
+        ["2020FUMI01", 5000],
       ],
     );
   },
@@ -184,7 +189,7 @@ test(
       result.events.map(({ event_id, requirement, count }) => [event_id, requirement.type, count]),
       [
         ["333", "attemptResult", 4],
-        ["444", "anyResult", 2],
+        ["444", "anyResult", 3],
         ["333bf", "ranking", null],
       ],
     );
@@ -199,7 +204,7 @@ test(
   async () => {
     const result = await createQualificationsService(pool).get("Champs2026", "unique", 1);
     // Ada's 3x3 Blindfolded single would put her in the top two, but rankings are not counted.
-    assert.equal(result.unique_count, 5);
+    assert.equal(result.unique_count, 6);
     assert.deepEqual(
       result.qualifiers.map(({ wca_id, events }) => [wca_id, events]),
       [
@@ -208,11 +213,59 @@ test(
         ["2020BENB01", ["333"]],
         ["2020CAOC01", ["444"]],
         ["2020DANI01", ["333"]],
+        ["2020FUMI01", ["444"]],
       ],
     );
     assert.equal(result.qualifiers[2].country_name, "Spain");
   },
 );
+
+test(
+  "a region keeps competitors by their current nationality, in the lists and the counts",
+  { skip: !socket },
+  async () => {
+    const service = createQualificationsService(pool);
+    // Dan competed for Spain once but is Polish now; 2026GONE01 has no nationality yet.
+    const spain = await service.get("Champs2026", "unique", 1, "Spain");
+    assert.equal(spain.region, "Spain");
+    assert.deepEqual(
+      spain.qualifiers.map(({ wca_id, events }) => [wca_id, events]),
+      [
+        ["2020BENB01", ["333"]],
+        ["2020CAOC01", ["444"]],
+      ],
+    );
+    assert.equal(spain.unique_count, 2);
+    assert.deepEqual(
+      spain.events.map(({ event_id, count }) => [event_id, count]),
+      [
+        ["333", 1],
+        ["444", 1],
+        ["333bf", null],
+      ],
+    );
+
+    const europe = await service.get("Champs2026", "333", 1, "_Europe");
+    assert.deepEqual(
+      europe.qualifiers.map(({ wca_id }) => wca_id),
+      ["2020ADAA01", "2020DANI01", "2020BENB01"],
+    );
+    assert.equal(europe.unique_count, 4);
+
+    const asia = await service.get("Champs2026", "444", 1, "_Asia");
+    assert.deepEqual(
+      asia.qualifiers.map(({ wca_id, result }) => [wca_id, result]),
+      [["2020FUMI01", 5000]],
+    );
+  },
+);
+
+test("an unknown region is rejected", { skip: !socket }, async () => {
+  await assert.rejects(
+    createQualificationsService(pool).get("Champs2026", "unique", 1, "Atlantis"),
+    QualificationInputError,
+  );
+});
 
 test("a page past the last qualifier is empty", { skip: !socket }, async () => {
   const result = await createQualificationsService(pool).get("Champs2026", "333", 2);
