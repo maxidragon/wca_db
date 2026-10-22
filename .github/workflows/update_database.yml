@@ -34,14 +34,10 @@ jobs:
     - name: Build frontend
       run: npm run build
       working-directory: ./frontend
+    # Builds the linkings and best ever ranks into the staging database too, so it needs the
+    # backend built above and the live tables are replaced, never removed.
     - name: Update database
       run: ./update_database.sh
-      working-directory: ./backend
-    - name: Compute linkings
-      run: ./compute_linkings.sh
-      working-directory: ./backend
-    - name: Compute best ever ranks
-      run: ./compute_best_ever_ranks.sh
       working-directory: ./backend
     - name: Restart service
       run: pm2 restart wca-db-backend -s || pm2 start dist/index.js --name wca-db-backend -s

@@ -1,6 +1,14 @@
 #!/bin/bash
 set -euo pipefail
 
+# Builds the linkings table the relations page reads. update_database.sh builds it as part
+# of an import; run this by hand to rebuild it for an existing database. The new table is
+# swapped in only once it is complete, so the relations page keeps working meanwhile.
+#
+# --if-missing builds it only when it is absent or empty, which is what a deploy wants.
+#
+# Usage: ./compute_linkings.sh [--if-missing] [database]
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ -f "$SCRIPT_DIR/.env" ]; then
   set -a
@@ -8,64 +16,29 @@ if [ -f "$SCRIPT_DIR/.env" ]; then
   set +a
 fi
 
+IF_MISSING=0
+if [ "${1:-}" = "--if-missing" ]; then
+  IF_MISSING=1
+  shift
+fi
+
 DB_USER="${DB_USER:-root}"
 DB_PASS="${DB_PASS:-}"
-DB_NAME="${DB_NAME:-wca}"
+DB_NAME="${1:-${DB_NAME:-wca}}"
 
-MYSQL_CMD="mysql --user=$DB_USER --password=$DB_PASS $DB_NAME"
+db() { mariadb --user="$DB_USER" --password="$DB_PASS" "$DB_NAME" "$@"; }
 
-echo "Creating linkings table if not exists..."
-$MYSQL_CMD <<'EOF'
-CREATE TABLE IF NOT EXISTS linkings (
-  wca_id VARCHAR(10) PRIMARY KEY,
-  wca_ids MEDIUMTEXT
-);
-EOF
+if [ "$IF_MISSING" = "1" ]; then
+  # Absent errors, which counts as missing just like an empty table.
+  EXISTING="$(db -Nse "SELECT EXISTS (SELECT 1 FROM linkings)" 2>/dev/null || echo 0)"
+  if [ "${EXISTING:-0}" = "1" ]; then
+    echo "Linkings already present in $DB_NAME, skipping."
+    exit 0
+  fi
+fi
 
-echo "Building temp table from results..."
-$MYSQL_CMD <<'EOF'
-DROP TABLE IF EXISTS wca_id_with_competition;
-CREATE TABLE wca_id_with_competition AS
-SELECT DISTINCT r.person_id AS wca_id, r.competition_id
-FROM results r
-JOIN competitions c ON r.competition_id = c.id
-WHERE c.country_id NOT IN ('XA', 'XE', 'XF', 'XM', 'XN', 'XO', 'XS', 'XW')
-  AND c.id NOT IN (
-    SELECT competition_id
-    FROM competition_venues
-    WHERE competition_id IN (
-      SELECT competition_id
-      FROM competition_events
-      GROUP BY competition_id
-      HAVING COUNT(*) = 1 AND MAX(event_id) = '333fm'
-    )
-    GROUP BY competition_id
-    HAVING COUNT(*) > 1
-  );
-EOF
+echo "Computing linkings in $DB_NAME (this takes about ten minutes)..."
+db < "$SCRIPT_DIR/linkings.sql"
 
-echo "Indexing temp table..."
-$MYSQL_CMD <<'EOF'
-CREATE INDEX idx_wca_comp ON wca_id_with_competition (competition_id, wca_id);
-EOF
-
-echo "Computing linkings (this may take 10-30 minutes)..."
-$MYSQL_CMD <<'EOF'
-SET SESSION group_concat_max_len = 1000000;
-
-DELETE FROM linkings;
-
-INSERT INTO linkings (wca_id, wca_ids)
-SELECT first.wca_id,
-       GROUP_CONCAT(DISTINCT second.wca_id) AS wca_ids
-FROM wca_id_with_competition first
-JOIN wca_id_with_competition second
-  ON first.competition_id = second.competition_id
- AND first.wca_id != second.wca_id
-GROUP BY first.wca_id;
-
-DROP TABLE IF EXISTS wca_id_with_competition;
-EOF
-
-COUNT=$($MYSQL_CMD -Nse "SELECT COUNT(*) FROM linkings")
+COUNT=$(db -Nse "SELECT COUNT(*) FROM linkings")
 echo "Done! Computed linkings for $COUNT competitors."

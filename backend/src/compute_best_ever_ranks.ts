@@ -512,12 +512,23 @@ export async function computeBestEverRanks(connection: Connection): Promise<numb
   return written;
 }
 
+/**
+ * The database named on the command line wins over DB_NAME, so update_database.sh can build
+ * the table into its staging database while the environment still names the live one.
+ */
+export function targetDatabase(
+  argv: readonly string[],
+  env: NodeJS.ProcessEnv
+): string {
+  return argv[2] || env.DB_NAME || "wca";
+}
+
 async function main(): Promise<void> {
   const connection = mysql.createConnection({
     host: process.env.DB_HOST || "localhost",
     user: process.env.DB_USER || "root",
     password: process.env.DB_PASS || "",
-    database: process.env.DB_NAME || "wca",
+    database: targetDatabase(process.argv, process.env),
     dateStrings: true,
   });
   try {
