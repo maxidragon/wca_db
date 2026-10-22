@@ -12,6 +12,13 @@ import { bestEverRanksReady, getBestEverRanks } from "./best_ever_ranks";
 import { getPersonProfile } from "./person";
 import { getNemeses, NEMESIS_REGIONS, type NemesisRegion } from "./nemeses";
 import {
+  getSchema,
+  isQueryTimeout,
+  QUERY_TIMEOUT_SECONDS,
+  queryPoolConfig,
+  runUserQuery,
+} from "./query_tool";
+import {
   createQualificationsService,
   QualificationInputError,
   qualificationIndexesReady,
@@ -52,6 +59,17 @@ const pool = mysql.createPool({
   waitForConnections: true,
   connectionLimit: 10,
 });
+// The Query Tool runs SQL its users write, so it gets a pool of its own that connects as a
+// read-only user. Unconfigured, the tool is off: it never falls back to the pool above.
+const queryPoolSettings = queryPoolConfig();
+const queryPool = queryPoolSettings.ok ? mysql.createPool(queryPoolSettings.options) : null;
+if (!queryPoolSettings.ok) {
+  console.warn(
+    `Query Tool disabled: ${queryPoolSettings.reason}. Create its user with backend/create_query_user.sh.`
+  );
+}
+const QUERY_TOOL_UNAVAILABLE = "The Query Tool is temporarily unavailable.";
+
 const statisticsService = createStatisticsService(pool);
 const qualificationsService = createQualificationsService(pool);
 
@@ -79,50 +97,6 @@ app.get("/api/statistics", ensureAuthenticated, async (req: Request, res: Respon
   }
 });
 
-function validateQuery(q: string): boolean {
-  if (!q || typeof q !== "string") return false;
-  const cleaned = q.trim().toUpperCase();
-
-  const firstWord = cleaned.split(/\s+/)[0];
-  if (["DESC", "DESCRIBE"].includes(firstWord)) return true;
-  if (firstWord === "SELECT") return true;
-
-  if (firstWord === "WITH") {
-    return /^\s*WITH[\s\S]+SELECT/i.test(cleaned);
-  }
-
-  return false;
-}
-
-// User-written SQL gets a hard execution budget enforced by the database itself: MariaDB kills
-// the statement once it has run this long, which frees the pool connection instead of leaving
-// a stale query behind after the HTTP request has already timed out on the client side.
-const QUERY_TIMEOUT_SECONDS = Number(process.env.QUERY_TIMEOUT_SECONDS) || 60;
-
-// MariaDB: max_statement_time exceeded. Not in mysql2's error table, so match on errno.
-const ER_STATEMENT_TIMEOUT = 1969;
-// Raised when the statement was cancelled some other way, e.g. KILL QUERY by an admin.
-const ER_QUERY_INTERRUPTED = 1317;
-
-function isQueryTimeout(err: any): boolean {
-  return err?.errno === ER_STATEMENT_TIMEOUT || err?.errno === ER_QUERY_INTERRUPTED;
-}
-
-function queryWithTimeLimit(sql: string) {
-  return pool.query<RowDataPacket[]>(
-    `SET STATEMENT max_statement_time=${QUERY_TIMEOUT_SECONDS} FOR ${sql}`
-  );
-}
-
-function hasDuplicateColumnNames(fields: mysql.FieldPacket[] | undefined): boolean {
-  if (!fields) return false;
-  const names = fields.map((f) => f.name);
-  return new Set(names).size !== names.length;
-}
-
-const DUPLICATE_COLUMNS_ERROR =
-  "Query cannot have two identical column names. Please use AS to alias them.";
-
 app.get("/api/metadata", async (req: Request, res: Response) => {
   try {
     const [rows] = await pool.query(
@@ -142,38 +116,9 @@ app.get(
   "/api/schema",
   ensureAuthenticated,
   async (req: Request, res: Response) => {
+    if (!queryPool) return res.status(503).json({ error: QUERY_TOOL_UNAVAILABLE });
     try {
-      const [tables] = await pool.query<RowDataPacket[]>(
-        `SELECT TABLE_NAME 
-       FROM INFORMATION_SCHEMA.TABLES 
-       WHERE TABLE_SCHEMA = ?`,
-        [process.env.DB_NAME]
-      );
-
-      const [columns] = await pool.query<RowDataPacket[]>(
-        `SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE 
-       FROM INFORMATION_SCHEMA.COLUMNS 
-       WHERE TABLE_SCHEMA = ?`,
-        [process.env.DB_NAME]
-      );
-
-      const schema: Record<
-        string,
-        { columns: { name: string; type: string }[] }
-      > = {};
-
-      (tables as RowDataPacket[]).forEach((t) => {
-        schema[t.TABLE_NAME] = { columns: [] };
-      });
-
-      (columns as RowDataPacket[]).forEach((c) => {
-        schema[c.TABLE_NAME]?.columns.push({
-          name: c.COLUMN_NAME,
-          type: c.DATA_TYPE,
-        });
-      });
-
-      res.json(schema);
+      res.json(await getSchema(queryPool));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -503,79 +448,21 @@ app.post(
   "/api/query",
   ensureAuthenticated,
   async (req: Request, res: Response) => {
-    const q = (req.body && req.body.query) as string;
-    let page = parseInt(req.body.page) || 1;
-    let pageSize = parseInt(req.body.pageSize) || 50;
+    if (!queryPool) return res.status(503).json({ error: QUERY_TOOL_UNAVAILABLE });
 
-    if (!validateQuery(q)) {
-      return res.status(400).json({
-        error:
-          "Only SELECT (with optional WITH) and DESC/DESCRIBE statements allowed",
-      });
-    }
+    const q = (req.body && req.body.query) as string;
+    const page = parseInt(req.body.page) || 1;
+    const pageSize = parseInt(req.body.pageSize) || 50;
 
     const userData = req.user as { wcaUserId: number; username: string };
     const requestedBy = `user ${userData.wcaUserId} (${userData.username})`;
 
     try {
-      const baseQuery = q.trim().replace(/;$/, "");
-      let rows: RowDataPacket[] = [];
-      let total = 0;
-
-      if (
-        baseQuery.toUpperCase().startsWith("SELECT") ||
-        baseQuery.toUpperCase().startsWith("WITH")
-      ) {
-        const limitMatch = baseQuery.match(/LIMIT\s+(\d+)/i);
-        if (limitMatch) {
-          const limitValue = parseInt(limitMatch[1], 10);
-          if (limitValue > 100) {
-            return res.status(400).json({ error: "LIMIT cannot exceed 100" });
-          }
-          console.log(
-            `Executing user-provided query with LIMIT: ${baseQuery}, requested by ${requestedBy}`
-          );
-          const [data, fields] = await queryWithTimeLimit(baseQuery);
-          if (hasDuplicateColumnNames(fields)) {
-            return res.status(400).json({ error: DUPLICATE_COLUMNS_ERROR });
-          }
-          rows = data;
-          total = rows.length;
-          page = 1;
-          pageSize = total;
-        } else {
-          const offset = (page - 1) * pageSize;
-          const paginatedQuery = `${baseQuery} LIMIT ${pageSize} OFFSET ${offset}`;
-          console.log(
-            `Executing paginated query: ${paginatedQuery}, requested by ${requestedBy}`
-          );
-          // The page and its total run side by side, each under the same time limit, so a
-          // slow query costs one limit rather than two. Both must finish: a query whose rows
-          // are cheap but whose total cannot be counted in time is still too heavy to serve.
-          const [[data, fields], [[countRow]]] = await Promise.all([
-            queryWithTimeLimit(paginatedQuery),
-            queryWithTimeLimit(
-              `SELECT COUNT(*) as count FROM (${baseQuery}) as sub`
-            ),
-          ]);
-          if (hasDuplicateColumnNames(fields)) {
-            return res.status(400).json({ error: DUPLICATE_COLUMNS_ERROR });
-          }
-          rows = data;
-          total = Number(countRow.count);
-        }
-      } else {
-        const [data, fields] = await pool.query<RowDataPacket[]>(baseQuery);
-        if (hasDuplicateColumnNames(fields)) {
-          return res.status(400).json({ error: DUPLICATE_COLUMNS_ERROR });
-        }
-        rows = data;
-        total = rows.length;
-        page = 1;
-        pageSize = total;
-      }
-
-      res.json({ rows, page, pageSize, total });
+      res.json(
+        await runUserQuery(queryPool, q, page, pageSize, (sql) =>
+          console.log(`Executing user-provided query: ${sql}, requested by ${requestedBy}`)
+        )
+      );
     } catch (err: any) {
       if (isQueryTimeout(err)) {
         console.log(`Query cancelled after ${QUERY_TIMEOUT_SECONDS}s, requested by ${requestedBy}`);
