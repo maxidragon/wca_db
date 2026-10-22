@@ -68,8 +68,7 @@ if (!queryPoolSettings.ok) {
     `Query Tool disabled: ${queryPoolSettings.reason}. Create its user with backend/create_query_user.sh.`
   );
 }
-const QUERY_TOOL_UNAVAILABLE =
-  "The Query Tool is unavailable: the server has no read-only database user configured for it.";
+const QUERY_TOOL_UNAVAILABLE = "The Query Tool is temporarily unavailable.";
 
 const statisticsService = createStatisticsService(pool);
 const qualificationsService = createQualificationsService(pool);
