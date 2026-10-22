@@ -5,7 +5,6 @@ import { getSchema } from "../../utils/utils";
 import { VscAdd, VscChromeClose } from "react-icons/vsc";
 import toast from "react-hot-toast";
 import ActionButtons from "./Components/ActionButtons";
-import { logout } from "../../utils/wcaAuth";
 
 interface QueryPageProps {
   token: string | null;
@@ -216,9 +215,8 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
             return { suggestions };
           },
         });
-      } else if (response.status === 401) {
-        logout();
-      } else {
+      } else if (response.status !== 401) {
+        // A 401 has already ended the session in backendRequest.
         toast.error("Error fetching schema");
       }
     };
