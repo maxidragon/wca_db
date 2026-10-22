@@ -12,6 +12,7 @@ import NemesesPage from "./pages/NemesesPage/NemesesPage";
 import Navbar, { type NavbarUserInfo } from "./components/Navbar/Navbar";
 import { FaGithub } from "react-icons/fa";
 import { getMetadata } from "./utils/utils";
+import { SESSION_EXPIRED_EVENT } from "./utils/request";
 import toast from "react-hot-toast";
 import type { ReactNode } from "react";
 
@@ -103,6 +104,17 @@ function App() {
     setToken(null);
     toast.success("Logged out");
   };
+
+  // Several requests usually fail together, so the toast id shows the message once.
+  useEffect(() => {
+    const endSession = () => {
+      setUserInfo(null);
+      setToken(null);
+      toast.error("Your session has expired. Log in again.", { id: SESSION_EXPIRED_EVENT });
+    };
+    window.addEventListener(SESSION_EXPIRED_EVENT, endSession);
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, endSession);
+  }, []);
 
   useEffect(() => {
     const fetchExportDate = async () => {
