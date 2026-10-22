@@ -68,6 +68,7 @@ export interface QualificationsResult {
   qualifiers: EventQualifier[] | UniqueQualifier[];
   /** The logged-in competitor's WCA ID, whether or not they are in the list. */
   viewer_wca_id: string | null;
+  viewer_name: string | null;
   /** The logged-in competitor's row and place in the filtered list, when they are in it. */
   viewer: { position: number; qualifier: EventQualifier | UniqueQualifier } | null;
 }

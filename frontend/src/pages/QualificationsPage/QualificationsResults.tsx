@@ -351,7 +351,7 @@ export default function QualificationsResults({
                       <tr className="border-b-2 border-blue-200 bg-gray-50">
                         <td className="px-4 py-2 text-right text-gray-400">—</td>
                         <td colSpan={tableSelected ? 5 : 4} className="truncate px-4 py-2 text-gray-500">
-                          You ({table.viewer_wca_id}) are not in this list
+                          You ({table.viewer_name ?? table.viewer_wca_id}) are not in this list
                           {region !== WORLD || competed !== "" ? " with these filters" : ""}.
                         </td>
                       </tr>

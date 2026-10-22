@@ -93,6 +93,8 @@ export interface QualificationsResult {
   qualifiers: EventQualifier[] | UniqueQualifier[];
   /** The logged-in competitor's WCA ID, whether or not they are in the list. */
   viewer_wca_id: string | null;
+  /** Their name as the persons table has it, or the WCA ID when it does not have them yet. */
+  viewer_name: string | null;
   /** The viewer's row, whichever page it is on, or null when they are not in the list. */
   viewer: ViewerQualification<EventQualifier> | ViewerQualification<UniqueQualifier> | null;
 }
@@ -565,6 +567,12 @@ async function servePage(
     const index = persons.indexOf(filters.viewer);
     return index === -1 ? -1 : positions.indexOf(index);
   };
+  // A viewer in the list has their name in their row; one who is not is named apart.
+  const nameViewer = async (row: Competitor | undefined) => {
+    if (row) return row.name;
+    if (filters.viewer === null) return null;
+    return (await competitors(pool, [filters.viewer])).get(filters.viewer)!.name;
+  };
 
   if (list === UNIQUE_LIST) {
     const all = unique ?? computed.unique.persons.map((_, index) => index);
@@ -581,6 +589,9 @@ async function servePage(
     return {
       ...base,
       qualifiers: rows.slice(0, pageSize),
+      viewer_name: await nameViewer(
+        viewerAt === -1 ? undefined : rows[positions.indexOf(all[viewerAt])],
+      ),
       viewer:
         viewerAt === -1
           ? null
@@ -613,6 +624,9 @@ async function servePage(
   return {
     ...base,
     qualifiers: rows.slice(0, pageSize),
+    viewer_name: await nameViewer(
+      viewerAt === -1 ? undefined : rows[positions.indexOf(all[viewerAt])],
+    ),
     viewer:
       viewerAt === -1
         ? null

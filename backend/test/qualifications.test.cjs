@@ -349,6 +349,7 @@ test(
     const eva = await service.get("Champs2026", "333", 1, { viewer: "2020EVAE01" });
     assert.equal(eva.viewer, null);
     assert.equal(eva.viewer_wca_id, "2020EVAE01");
+    assert.equal(eva.viewer_name, "Eva");
     assert.equal(
       (await service.get("Champs2026", "unique", 1, { viewer: "2020DANI01", region: "Spain" })).viewer,
       null,
