@@ -5,6 +5,7 @@ const { readFileSync } = require("node:fs");
 const path = require("node:path");
 const {
   createQualificationsService,
+  parseCustomRequirements,
   parseRequirement,
   qualificationIndexesReady,
   QualificationInputError,
@@ -263,6 +264,101 @@ test(
 test("an unknown region is rejected", { skip: !socket }, async () => {
   await assert.rejects(
     createQualificationsService(pool).get("Champs2026", "unique", 1, "Atlantis"),
+    QualificationInputError,
+  );
+});
+
+test("a custom set reads event, result type and limit or any", () => {
+  assert.deepEqual(parseCustomRequirements("333:average:1000,444:single:any", "2026-06-01"), [
+    {
+      event_id: "333",
+      requirement: { type: "attemptResult", result_type: "average", when_date: "2026-06-01", level: 1000 },
+    },
+    {
+      event_id: "444",
+      requirement: { type: "anyResult", result_type: "single", when_date: "2026-06-01", level: null },
+    },
+  ]);
+  assert.equal(parseCustomRequirements("333:single:any", null)[0].requirement.when_date, null);
+  for (const [spec, deadline] of [
+    ["", null],
+    ["333:best:1000", null],
+    ["333:single:0", null],
+    ["333:single:-5", null],
+    ["333:single:9999999999", null],
+    ["333:single:1000,333:average:1000", null],
+    ["333:single:1000", "2026-02-30"],
+    ["333:single:1000", "June 2026"],
+  ]) {
+    assert.throws(() => parseCustomRequirements(spec, deadline), QualificationInputError, spec);
+  }
+});
+
+test(
+  "custom requirements are checked like a competition's, in event order",
+  { skip: !socket },
+  async () => {
+    const service = createQualificationsService(pool);
+    // The same two checked requirements as Champs2026, written in the other order.
+    const result = await service.getCustom("444:single:any,333:average:1000", "2026-06-01", "333", 1);
+    assert.equal(result.competition, null);
+    assert.deepEqual(
+      result.events.map(({ event_id, event_name, count }) => [event_id, event_name, count]),
+      [
+        ["333", "3x3x3 Cube", 4],
+        ["444", "4x4x4 Cube", 3],
+      ],
+    );
+    assert.deepEqual(
+      result.qualifiers.map(({ wca_id, result }) => [wca_id, result]),
+      [
+        ["2020ADAA01", 900],
+        ["2020DANI01", 950],
+        ["2026GONE01", 995],
+        ["2020BENB01", 999],
+      ],
+    );
+    assert.equal(result.unique_count, 6);
+  },
+);
+
+test(
+  "without a deadline every result counts",
+  { skip: !socket },
+  async () => {
+    const service = createQualificationsService(pool);
+    const result = await service.getCustom("333:average:1000,444:single:any", null, "333", 1);
+    // Dan's 8.00 from Late now counts, and comes from there; Ben's late 4x4 single counts too.
+    assert.deepEqual(result.qualifiers[0], {
+      wca_id: "2020DANI01",
+      name: "Dan",
+      country_id: "Poland",
+      country_name: "Poland",
+      result: 800,
+      competition_id: "Late2026",
+      competition_name: "Late 2026",
+    });
+    assert.equal(result.events[1].count, 4);
+  },
+);
+
+test("custom requirements filter by region too", { skip: !socket }, async () => {
+  const result = await createQualificationsService(pool).getCustom(
+    "333:average:1000,444:single:any",
+    "2026-06-01",
+    "unique",
+    1,
+    "Spain",
+  );
+  assert.deepEqual(
+    result.qualifiers.map(({ wca_id }) => wca_id),
+    ["2020BENB01", "2020CAOC01"],
+  );
+});
+
+test("a custom event the export lacks is rejected", { skip: !socket }, async () => {
+  await assert.rejects(
+    createQualificationsService(pool).getCustom("nope:single:any", null, "unique", 1),
     QualificationInputError,
   );
 });

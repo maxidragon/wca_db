@@ -1,125 +1,61 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { backendRequest } from "../../utils/request";
-import { formatDate, formatResult } from "../../utils/results";
+import { formatDate } from "../../utils/results";
+import CompetitionSearch from "./CompetitionSearch";
+import CustomRequirementsForm from "./CustomRequirementsForm";
+import QualificationsResults from "./QualificationsResults";
+import {
+  decodeCustom,
+  encodeCustom,
+  UNIQUE_LIST,
+  WORLD,
+  type EventOption,
+  type QualificationsResult,
+  type Region,
+} from "./requirements";
 
 const WCA_ORIGIN = "https://www.worldcubeassociation.org";
-const UNIQUE_LIST = "unique";
-const WORLD = "World";
-
-interface Region {
-  id: string;
-  name: string;
-  kind: string;
-}
-
-interface Competition {
-  id: string;
-  name: string;
-  start_date: string;
-  end_date: string;
-  country_id: string;
-}
-
-interface Requirement {
-  type: "attemptResult" | "ranking" | "anyResult";
-  result_type: "single" | "average";
-  when_date: string;
-  level: number | null;
-}
-
-interface EventRequirement {
-  event_id: string;
-  event_name: string;
-  requirement: Requirement;
-  count: number | null;
-}
-
-interface Competitor {
-  wca_id: string;
-  name: string;
-  country_id: string | null;
-  country_name: string | null;
-}
-
-interface EventQualifier extends Competitor {
-  result: number;
-  competition_id: string;
-  competition_name: string;
-}
-
-interface UniqueQualifier extends Competitor {
-  events: string[];
-}
-
-interface QualificationsResult {
-  competition: Competition;
-  events: EventRequirement[];
-  unique_count: number;
-  region: string;
-  list: string;
-  page: number;
-  page_size: number;
-  qualifiers: EventQualifier[] | UniqueQualifier[];
-}
-
-/** The requirement as the WCA words it on a competition's events page. */
-function describeRequirement(eventId: string, requirement: Requirement): string {
-  const kind = requirement.result_type === "single" ? "Single" : "Average";
-  const level = requirement.level ?? 0;
-  if (requirement.type === "ranking") {
-    return `Top ${level} registered competitors by ${requirement.result_type}`;
-  }
-  if (requirement.type === "anyResult") {
-    return `Any successful ${requirement.result_type}`;
-  }
-  if (eventId === "333mbf") {
-    const points = 99 - Math.floor(level / 10000000);
-    return `${kind} of at least ${points} ${points === 1 ? "point" : "points"}`;
-  }
-  if (eventId === "333fm") {
-    return `${kind} under ${formatResult(level, eventId, requirement.result_type)} moves`;
-  }
-  return `${kind} under ${formatResult(level, eventId, requirement.result_type)}`;
-}
-
-function PersonLink({ wcaId, name }: { wcaId: string; name: string }) {
-  return (
-    <a
-      href={`${WCA_ORIGIN}/persons/${wcaId}`}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="text-blue-600 hover:underline"
-    >
-      {name}
-    </a>
-  );
-}
+const CUSTOM_MODE = "custom";
 
 const QualificationsPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
+  const custom = searchParams.get("mode") === CUSTOM_MODE;
   const competitionId = (searchParams.get("competition_id") || "").trim();
+  const requirements = searchParams.get("requirements") || "";
+  const deadline = searchParams.get("deadline") || "";
   const list = searchParams.get("list") || UNIQUE_LIST;
   const region = searchParams.get("region") || WORLD;
   const page = Math.max(1, Number(searchParams.get("page")) || 1);
-  const [query, setQuery] = useState(competitionId);
-  const [suggestions, setSuggestions] = useState<Competition[]>([]);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [isSearching, setIsSearching] = useState(false);
-  const [result, setResult] = useState<QualificationsResult | null>(null);
+  // What the lists are of: one competition's requirements, or a custom set. A result belongs
+  // to the source it was loaded for, so switching sources never shows the previous one's lists.
+  const source = custom
+    ? requirements &&
+      `api/qualifications/custom?requirements=${encodeURIComponent(requirements)}${
+        deadline ? `&deadline=${deadline}` : ""
+      }`
+    : competitionId && `api/qualifications?competition_id=${encodeURIComponent(competitionId)}`;
+
+  const [result, setResult] = useState<{ source: string; data: QualificationsResult } | null>(
+    null,
+  );
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [regions, setRegions] = useState<Region[]>([]);
-  const searchVersion = useRef(0);
+  const [events, setEvents] = useState<EventOption[]>([]);
 
-  // The statistics already name every region the export has, the same way this filter does.
+  // The statistics already name every region and current event, the same way these filters do.
   useEffect(() => {
     (async () => {
       try {
         const res = await backendRequest("api/statistics/options", "GET", true);
-        if (res.ok) setRegions((await res.json()).regions);
+        if (res.ok) {
+          const options = await res.json();
+          setRegions(options.regions);
+          setEvents(options.events);
+        }
       } catch {
-        // Without the list the filter offers only the world, which still works.
+        // Without the list the region filter offers only the world, which still works.
       }
     })();
   }, []);
@@ -127,7 +63,7 @@ const QualificationsPage = () => {
   // The lists follow the URL, so a shared link, the selected list and the page all load what
   // they name.
   useEffect(() => {
-    if (!competitionId) {
+    if (!source) {
       setResult(null);
       setError(null);
       return;
@@ -138,17 +74,15 @@ const QualificationsPage = () => {
     (async () => {
       try {
         const res = await backendRequest(
-          `api/qualifications?competition_id=${encodeURIComponent(competitionId)}&list=${encodeURIComponent(list)}&region=${encodeURIComponent(region)}&page=${page}`,
+          `${source}&list=${encodeURIComponent(list)}&region=${encodeURIComponent(region)}&page=${page}`,
           "GET",
           true,
           undefined,
           request.signal,
         );
         const data = await res.json();
-        if (res.ok) {
-          setResult(data);
-          setQuery(data.competition.name);
-        } else {
+        if (res.ok) setResult({ source, data });
+        else {
           setResult(null);
           setError(data.error || "Unknown error");
         }
@@ -162,37 +96,7 @@ const QualificationsPage = () => {
       }
     })();
     return () => request.abort();
-  }, [competitionId, list, region, page]);
-
-  useEffect(() => {
-    const trimmed = query.trim();
-    if (trimmed.length < 2 || result?.competition.name === query) {
-      setSuggestions([]);
-      setIsSearching(false);
-      return;
-    }
-    const version = ++searchVersion.current;
-    const timer = window.setTimeout(async () => {
-      setIsSearching(true);
-      try {
-        const response = await backendRequest(
-          `api/competitions/search?q=${encodeURIComponent(trimmed)}&with_qualifications=1`,
-          "GET",
-          true,
-        );
-        const data = await response.json();
-        if (version === searchVersion.current) {
-          setSuggestions(response.ok ? data.competitions : []);
-          setSearchOpen(true);
-        }
-      } catch {
-        if (version === searchVersion.current) setSuggestions([]);
-      } finally {
-        if (version === searchVersion.current) setIsSearching(false);
-      }
-    }, 250);
-    return () => window.clearTimeout(timer);
-  }, [query, result?.competition.name]);
+  }, [source, list, region, page]);
 
   const update = (changes: Record<string, string | null>) => {
     const next = new URLSearchParams(searchParams);
@@ -203,37 +107,15 @@ const QualificationsPage = () => {
     setSearchParams(next);
   };
 
-  const selectCompetition = (id: string) => {
-    setSuggestions([]);
-    setSearchOpen(false);
-    // The region usually outlives the competition: a national team checks one after another.
-    setSearchParams(region === WORLD ? { competition_id: id } : { competition_id: id, region });
-  };
+  // A new source starts at the unique list's first page. The region usually outlives it: a
+  // national team checks one competition, or one set of limits, after another.
+  const showSource = (params: Record<string, string>) =>
+    setSearchParams(region === WORLD ? params : { ...params, region });
 
-  const submitSearch = (event: React.FormEvent) => {
-    event.preventDefault();
-    const trimmed = query.trim();
-    const exact = suggestions.find(
-      (competition) => competition.id.toLowerCase() === trimmed.toLowerCase(),
-    );
-    if (exact) selectCompetition(exact.id);
-    else if (/^[a-z0-9_-]*\d{4}$/i.test(trimmed)) selectCompetition(trimmed);
-    else if (suggestions.length === 1) selectCompetition(suggestions[0].id);
-    else setSearchOpen(true);
-  };
-
-  // The requirements belong to the competition, not the list, so they stay while a list loads.
-  const current =
-    result && result.competition.id.toLowerCase() === competitionId.toLowerCase() ? result : null;
+  const current = result && result.source === source ? result.data : null;
   const shown = current && current.list === list && current.region === region ? current : null;
-  const checked = current ? current.events.filter((event) => event.count !== null) : [];
-  const unchecked = current ? current.events.filter((event) => event.count === null) : [];
-  const selected = current?.events.find((event) => event.event_id === list) ?? null;
-  const total = current ? (selected ? selected.count ?? 0 : current.unique_count) : 0;
-  const pages = shown ? Math.max(1, Math.ceil(total / shown.page_size)) : 1;
-  const eventNames = new Map(current?.events.map((event) => [event.event_id, event.event_name]));
 
-  const tabClass = (active: boolean) =>
+  const modeClass = (active: boolean) =>
     `cursor-pointer rounded px-3 py-1.5 font-medium transition-colors ${
       active ? "bg-blue-100 text-blue-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
     }`;
@@ -241,260 +123,78 @@ const QualificationsPage = () => {
   return (
     <div className="mx-auto max-w-6xl p-4">
       <h2 className="mb-1 text-2xl font-bold">Qualifications</h2>
-      <p className="mb-6 text-sm text-gray-500">
-        Everyone who meets a competition's qualification requirements, per event and as one list
-        of unique competitors.
+      <p className="mb-4 text-sm text-gray-500">
+        Everyone who meets a competition's qualification requirements, or requirements you set,
+        per event and as one list of unique competitors.
       </p>
 
-      <form onSubmit={submitSearch} className="relative mb-6 max-w-2xl">
-        <div className="flex gap-2">
-          <div className="relative flex-1">
-            <input
-              value={query}
-              onChange={(event) => {
-                setQuery(event.target.value);
-                setSearchOpen(true);
-              }}
-              onFocus={() => setSearchOpen(true)}
-              placeholder="Search competitions with qualification requirements"
-              className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 pr-10 focus:outline-none focus:ring-2 focus:ring-blue-400"
-            />
-            {isSearching && (
-              <div className="absolute right-3 top-3 h-5 w-5 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
-            )}
-          </div>
-          <button
-            type="submit"
-            disabled={isLoading || query.trim().length < 2}
-            className="cursor-pointer rounded-lg bg-blue-500 px-5 py-2.5 text-white hover:bg-blue-600 disabled:cursor-not-allowed disabled:bg-gray-400"
-          >
-            Search
-          </button>
-        </div>
+      <div className="mb-6 inline-flex rounded-lg border border-gray-300 bg-white p-1 text-sm">
+        <button
+          type="button"
+          onClick={() => showSource({})}
+          className={modeClass(!custom)}
+        >
+          Competition
+        </button>
+        <button
+          type="button"
+          onClick={() => showSource({ mode: CUSTOM_MODE })}
+          className={modeClass(custom)}
+        >
+          Custom
+        </button>
+      </div>
 
-        {searchOpen && suggestions.length > 0 && (
-          <div className="absolute z-20 mt-1 max-h-80 w-[calc(100%-6.5rem)] overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
-            {suggestions.map((competition) => (
-              <button
-                key={competition.id}
-                type="button"
-                onClick={() => selectCompetition(competition.id)}
-                className="flex w-full cursor-pointer items-center justify-between gap-4 border-b border-gray-100 px-4 py-3 text-left last:border-0 hover:bg-blue-50"
-              >
-                <span>
-                  <span className="block text-sm font-medium text-gray-800">{competition.name}</span>
-                  <span className="block text-xs text-gray-400">{competition.id}</span>
-                </span>
-                <span className="shrink-0 text-xs text-gray-500">
-                  {formatDate(competition.start_date)}
-                </span>
-              </button>
-            ))}
-          </div>
-        )}
-      </form>
-
-      {current && (
-        <div className="mb-6">
-          <a
-            href={`${WCA_ORIGIN}/competitions/${current.competition.id}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-xl font-semibold text-gray-900 hover:underline"
-          >
-            {current.competition.name}
-          </a>
-          <p className="text-sm text-gray-500">{formatDate(current.competition.start_date)}</p>
-        </div>
-      )}
-
-      {current && current.events.length > 0 && (
+      {custom ? (
+        // Keyed by the URL's set, so going back in history refills the form with it.
+        <CustomRequirementsForm
+          key={`${requirements}|${deadline}|${events.length}`}
+          events={events}
+          initial={decodeCustom(requirements)}
+          initialDeadline={deadline}
+          disabled={isLoading || events.length === 0}
+          onSubmit={(set, until) =>
+            showSource({
+              mode: CUSTOM_MODE,
+              requirements: encodeCustom(set),
+              ...(until ? { deadline: until } : {}),
+            })
+          }
+        />
+      ) : (
         <>
-          <label className="mb-3 flex items-center gap-2 text-sm font-medium text-gray-700">
-            Region
-            <select
-              aria-label="Region"
-              value={region}
-              onChange={(e) =>
-                update({ region: e.target.value === WORLD ? null : e.target.value, page: null })
-              }
-              className="rounded border border-gray-300 bg-white px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-400"
-            >
-              <option value={WORLD}>World</option>
-              {(["continent", "country"] as const).map((kind) => (
-                <optgroup key={kind} label={kind === "continent" ? "Continents" : "Countries"}>
-                  {regions
-                    .filter((r) => r.kind === kind)
-                    .map((r) => (
-                      <option key={r.id} value={r.id}>
-                        {r.name}
-                      </option>
-                    ))}
-                </optgroup>
-              ))}
-            </select>
-            <span className="font-normal text-gray-500">by current nationality</span>
-          </label>
-
-          <div className="mb-4 flex flex-wrap gap-1 rounded-lg border border-gray-300 bg-white p-1 text-sm">
-            <button
-              type="button"
-              onClick={() => update({ list: null, page: null })}
-              className={tabClass(list === UNIQUE_LIST)}
-            >
-              Unique competitors
-              <span className="ml-1.5 text-xs text-gray-500">
-                {current.unique_count.toLocaleString()}
-              </span>
-            </button>
-            {checked.map((event) => (
-              <button
-                key={event.event_id}
-                type="button"
-                onClick={() => update({ list: event.event_id, page: null })}
-                className={tabClass(list === event.event_id)}
+          <CompetitionSearch
+            initialQuery={competitionId}
+            selectedName={current?.competition?.name ?? null}
+            disabled={isLoading}
+            onSelect={(id) => showSource({ competition_id: id })}
+          />
+          {current?.competition && (
+            <div className="mb-6">
+              <a
+                href={`${WCA_ORIGIN}/competitions/${current.competition.id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xl font-semibold text-gray-900 hover:underline"
               >
-                {event.event_name}
-                <span className="ml-1.5 text-xs text-gray-500">
-                  {event.count!.toLocaleString()}
-                </span>
-              </button>
-            ))}
-          </div>
-
-          <div className="mb-6 text-sm text-gray-600">
-            {selected ? (
-              <p>
-                {describeRequirement(selected.event_id, selected.requirement)}, in a competition
-                ending by {formatDate(selected.requirement.when_date)}.
-              </p>
-            ) : (
-              <p>Everyone who meets at least one of the requirements listed per event.</p>
-            )}
-            {unchecked.length > 0 && (
-              <p className="mt-1 text-gray-500">
-                Not listed, because a top N requirement depends on who registers:{" "}
-                {unchecked
-                  .map(
-                    (event) =>
-                      `${event.event_name} (${describeRequirement(event.event_id, event.requirement).toLowerCase()})`,
-                  )
-                  .join(", ")}
-                .
-              </p>
-            )}
-          </div>
+                {current.competition.name}
+              </a>
+              <p className="text-sm text-gray-500">{formatDate(current.competition.start_date)}</p>
+            </div>
+          )}
         </>
       )}
 
-      {isLoading && (
-        <div className="my-8 flex justify-center">
-          <div className="h-6 w-6 animate-spin rounded-full border-4 border-blue-500 border-t-transparent" />
-        </div>
-      )}
-
-      {error && !isLoading && <p className="text-red-500">{error}</p>}
-
-      {shown && !isLoading && !error && (
-        shown.events.length === 0 ? (
-          <p className="text-gray-600">This competition has no qualification requirements.</p>
-        ) : total === 0 ? (
-          <p className="text-gray-600">
-            {checked.length === 0
-              ? "This competition only has top N requirements, which depend on who registers and are not listed."
-              : region === WORLD
-                ? "Nobody meets this requirement yet."
-                : "Nobody from this region meets this requirement yet."}
-          </p>
-        ) : (
-          <>
-            <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 text-xs uppercase text-gray-500">
-                  <tr>
-                    <th className="px-4 py-2 text-right">#</th>
-                    <th className="px-4 py-2 text-left">Name</th>
-                    <th className="px-4 py-2 text-left">WCA ID</th>
-                    <th className="px-4 py-2 text-left">Country</th>
-                    {selected ? (
-                      <>
-                        <th className="px-4 py-2 text-right">Result</th>
-                        <th className="px-4 py-2 text-left">Achieved at</th>
-                      </>
-                    ) : (
-                      <th className="px-4 py-2 text-left">Events</th>
-                    )}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {shown.qualifiers.map((qualifier, index) => (
-                    <tr key={qualifier.wca_id} className="transition-colors hover:bg-gray-50">
-                      <td className="px-4 py-2 text-right text-gray-500">
-                        {(shown.page - 1) * shown.page_size + index + 1}
-                      </td>
-                      <td className="px-4 py-2">
-                        <PersonLink wcaId={qualifier.wca_id} name={qualifier.name} />
-                      </td>
-                      <td className="px-4 py-2 font-mono text-gray-600">{qualifier.wca_id}</td>
-                      <td className="px-4 py-2 text-gray-600">{qualifier.country_name ?? "—"}</td>
-                      {selected && "result" in qualifier ? (
-                        <>
-                          <td className="px-4 py-2 text-right font-mono">
-                            {formatResult(
-                              qualifier.result,
-                              selected.event_id,
-                              selected.requirement.result_type,
-                            )}
-                          </td>
-                          <td className="px-4 py-2">
-                            <a
-                              href={`${WCA_ORIGIN}/competitions/${qualifier.competition_id}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-blue-600 hover:underline"
-                            >
-                              {qualifier.competition_name}
-                            </a>
-                          </td>
-                        </>
-                      ) : (
-                        <td className="px-4 py-2 text-gray-600">
-                          {"events" in qualifier &&
-                            `${qualifier.events.length} · ${qualifier.events
-                              .map((event) => eventNames.get(event) ?? event)
-                              .join(", ")}`}
-                        </td>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-gray-600">
-              <span>
-                {total.toLocaleString()} {selected ? "qualifiers" : "unique competitors"} · Page{" "}
-                {shown.page} of {pages}
-              </span>
-              <div className="flex gap-2">
-                <button
-                  disabled={shown.page <= 1}
-                  onClick={() => update({ page: String(shown.page - 1) })}
-                  className="cursor-pointer rounded border border-gray-300 bg-white px-3 py-2 disabled:opacity-40"
-                >
-                  Previous
-                </button>
-                <button
-                  disabled={shown.page >= pages}
-                  onClick={() => update({ page: String(shown.page + 1) })}
-                  className="cursor-pointer rounded border border-gray-300 bg-white px-3 py-2 disabled:opacity-40"
-                >
-                  Next
-                </button>
-              </div>
-            </div>
-          </>
-        )
-      )}
+      <QualificationsResults
+        current={current}
+        shown={shown}
+        list={list}
+        region={region}
+        regions={regions}
+        isLoading={isLoading}
+        error={error}
+        update={update}
+      />
     </div>
   );
 };

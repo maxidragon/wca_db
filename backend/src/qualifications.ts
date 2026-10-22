@@ -12,8 +12,13 @@ const QUALIFICATION_TIMEOUT_SECONDS = 60;
 // Events are aggregated a few at a time, so a championship with a dozen requirements neither
 // waits for them one by one nor takes every connection the other pages share.
 const EVENT_CONCURRENCY = 3;
-// One competition's lists hold up to a few hundred thousand competitors per event.
-const CACHED_COMPETITIONS = 5;
+// One competition's lists hold up to a few hundred thousand competitors per event. Custom
+// requirement sets share the same slots.
+const CACHED_COMPUTATIONS = 5;
+// A custom set holds at most one requirement per event, and there are fewer events than this.
+export const MAX_CUSTOM_REQUIREMENTS = 20;
+// An attempt result is a signed 32-bit integer in the export.
+const MAX_LEVEL = 2147483647;
 
 export type RequirementType = "attemptResult" | "ranking" | "anyResult";
 export type ResultType = "single" | "average";
@@ -21,7 +26,8 @@ export type ResultType = "single" | "average";
 export interface Requirement {
   type: RequirementType;
   result_type: ResultType;
-  when_date: string;
+  /** The deadline; a custom requirement may have none, and then every result counts. */
+  when_date: string | null;
   level: number | null;
 }
 
@@ -57,13 +63,14 @@ export interface UniqueQualifier extends Competitor {
 }
 
 export interface QualificationsResult {
+  /** The competition whose requirements these are, or null for custom requirements. */
   competition: {
     id: string;
     name: string;
     start_date: string;
     end_date: string;
     country_id: string;
-  };
+  } | null;
   events: EventRequirement[];
   /** Competitors who meet at least one checked requirement. */
   unique_count: number;
@@ -87,6 +94,18 @@ interface CompetitionEventRow extends RowDataPacket {
   event_id: string;
   event_name: string;
   qualification: string;
+}
+
+interface EventRow extends RowDataPacket {
+  id: string;
+  name: string;
+}
+
+/** One event's requirement, as both competitions and custom sets hand it to the computation. */
+interface EventEntry {
+  event_id: string;
+  event_name: string;
+  requirement: Requirement;
 }
 
 interface QualifierRow extends RowDataPacket {
@@ -124,7 +143,7 @@ interface AchievedRow extends RowDataPacket {
   competition_name: string;
 }
 
-/** Everything a competition's pages are served from, computed once per export. */
+/** Everything a competition's or custom set's pages are served from, computed once per export. */
 interface ComputedQualifications {
   competition: QualificationsResult["competition"];
   events: EventRequirement[];
@@ -198,13 +217,20 @@ function qualifiersStatement(eventId: string, requirement: Requirement) {
     limit = `AND r.${column} < ?`;
     params.push(requirement.level);
   }
-  params.push(requirement.when_date);
+  // Without a deadline every result counts, and the index alone answers the statement.
+  let deadline = "";
+  let join = "";
+  if (requirement.when_date !== null) {
+    join = "STRAIGHT_JOIN competitions c ON c.id = r.competition_id";
+    deadline = "AND c.end_date <= ?";
+    params.push(requirement.when_date);
+  }
   return {
     sql: `SET STATEMENT max_statement_time=${QUALIFICATION_TIMEOUT_SECONDS} FOR
           SELECT r.person_id, MIN(r.${column}) AS value
           FROM results r FORCE INDEX (${index})
-          STRAIGHT_JOIN competitions c ON c.id = r.competition_id
-          WHERE r.event_id = ? AND r.${column} > 0 ${limit} AND c.end_date <= ?
+          ${join}
+          WHERE r.event_id = ? AND r.${column} > 0 ${limit} ${deadline}
           GROUP BY r.person_id`,
     params,
   };
@@ -227,7 +253,7 @@ async function mapConcurrently<T, R>(
   return results;
 }
 
-async function computeQualifications(
+async function computeCompetition(
   pool: Pool,
   competitionId: string,
 ): Promise<ComputedQualifications | null> {
@@ -254,7 +280,33 @@ async function computeQualifications(
     .filter((entry): entry is { row: CompetitionEventRow; requirement: Requirement } =>
       entry.requirement !== null,
     );
-  const checked = parsed.filter((entry) => isChecked(entry.requirement));
+  return computeLists(
+    pool,
+    {
+      id: competition.id,
+      name: competition.name,
+      start_date: competition.start_date,
+      end_date: competition.end_date,
+      country_id: competition.country_id,
+    },
+    parsed.map(({ row, requirement }) => ({
+      event_id: row.event_id,
+      event_name: row.event_name,
+      requirement,
+    })),
+  );
+}
+
+/**
+ * Lists everyone who meets each checked requirement, and everyone who meets at least one.
+ * Requirements that are not checked are kept so they can be shown, with no count.
+ */
+async function computeLists(
+  pool: Pool,
+  competition: QualificationsResult["competition"],
+  entries: EventEntry[],
+): Promise<ComputedQualifications> {
+  const checked = entries.filter((entry) => isChecked(entry.requirement));
 
   // The same competitor recurs in most lists; one string each keeps a cached competition small.
   const interned = new Map<string, string>();
@@ -265,7 +317,7 @@ async function computeQualifications(
     return id;
   };
   const qualifierRows = await mapConcurrently(checked, EVENT_CONCURRENCY, async (entry) => {
-    const { sql, params } = qualifiersStatement(entry.row.event_id, entry.requirement);
+    const { sql, params } = qualifiersStatement(entry.event_id, entry.requirement);
     const [rows] = await pool.query<QualifierRow[]>(sql, params);
     return rows.map((row) => ({ person_id: intern(row.person_id), value: Number(row.value) }));
   });
@@ -304,14 +356,14 @@ async function computeQualifications(
     const rows = qualifierRows[index].sort(
       (a, b) => a.value - b.value || byName(a.person_id, b.person_id),
     );
-    lists.set(entry.row.event_id, {
+    lists.set(entry.event_id, {
       persons: rows.map((row) => row.person_id),
       values: Int32Array.from(rows, (row) => row.value),
     });
     for (const row of rows) {
       const events = metBy.get(row.person_id);
-      if (events) events.push(entry.row.event_id);
-      else metBy.set(row.person_id, [entry.row.event_id]);
+      if (events) events.push(entry.event_id);
+      else metBy.set(row.person_id, [entry.event_id]);
     }
   });
   const uniquePersons = [...metBy.keys()].sort(
@@ -319,18 +371,10 @@ async function computeQualifications(
   );
 
   return {
-    competition: {
-      id: competition.id,
-      name: competition.name,
-      start_date: competition.start_date,
-      end_date: competition.end_date,
-      country_id: competition.country_id,
-    },
-    events: parsed.map(({ row, requirement }) => ({
-      event_id: row.event_id,
-      event_name: row.event_name,
-      requirement,
-      count: lists.get(row.event_id)?.persons.length ?? null,
+    competition,
+    events: entries.map((entry) => ({
+      ...entry,
+      count: lists.get(entry.event_id)?.persons.length ?? null,
     })),
     lists,
     unique: {
@@ -408,9 +452,15 @@ async function achievedAt(
     `SELECT r.person_id, r.${column} AS value, r.competition_id, c.name AS competition_name
      FROM results r FORCE INDEX (${index})
      STRAIGHT_JOIN competitions c ON c.id = r.competition_id
-     WHERE r.event_id = ? AND r.${column} IN (?) AND r.person_id IN (?) AND c.end_date <= ?
+     WHERE r.event_id = ? AND r.${column} IN (?) AND r.person_id IN (?)
+       ${requirement.when_date === null ? "" : "AND c.end_date <= ?"}
      ORDER BY c.end_date, c.id`,
-    [eventId, [...new Set(values)], persons, requirement.when_date],
+    [
+      eventId,
+      [...new Set(values)],
+      persons,
+      ...(requirement.when_date === null ? [] : [requirement.when_date]),
+    ],
   );
   const listed = new Map(persons.map((person, index) => [person, values[index]]));
   const achieved = new Map<string, { competition_id: string; competition_name: string }>();
@@ -505,6 +555,87 @@ async function servePage(
   };
 }
 
+const CUSTOM_REQUIREMENT_RE = /^([a-z0-9]{2,6}):(single|average):(any|[1-9][0-9]{0,9})$/;
+
+function isIsoDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+/**
+ * Reads a custom requirement set: comma-separated `event:single|average:level`, where the
+ * level is an encoded attempt result the result must be strictly better than, or `any` for
+ * any successful result. One deadline, or none, applies to every event. Top N cannot be asked
+ * for, since who meets it depends on registrations. Event names are checked by the caller.
+ */
+export function parseCustomRequirements(
+  spec: string,
+  deadline: string | null,
+): { event_id: string; requirement: Requirement }[] {
+  if (deadline !== null && !isIsoDate(deadline)) {
+    throw new QualificationInputError("deadline must be a date written as YYYY-MM-DD");
+  }
+  const parts = spec.split(",").filter((part) => part !== "");
+  if (parts.length === 0) {
+    throw new QualificationInputError("requirements must name at least one event");
+  }
+  if (parts.length > MAX_CUSTOM_REQUIREMENTS) {
+    throw new QualificationInputError(
+      `requirements can name at most ${MAX_CUSTOM_REQUIREMENTS} events`,
+    );
+  }
+  const seen = new Set<string>();
+  return parts.map((part) => {
+    const match = CUSTOM_REQUIREMENT_RE.exec(part);
+    if (!match) {
+      throw new QualificationInputError(
+        `"${part}" is not a requirement; expected event:single|average:limit or event:single|average:any`,
+      );
+    }
+    const [, eventId, resultType, level] = match;
+    if (seen.has(eventId)) {
+      throw new QualificationInputError(`${eventId} has more than one requirement`);
+    }
+    seen.add(eventId);
+    if (level !== "any" && Number(level) > MAX_LEVEL) {
+      throw new QualificationInputError(`the limit for ${eventId} is not an attempt result`);
+    }
+    return {
+      event_id: eventId,
+      requirement: {
+        type: level === "any" ? "anyResult" : "attemptResult",
+        result_type: resultType as ResultType,
+        when_date: deadline,
+        level: level === "any" ? null : Number(level),
+      },
+    };
+  });
+}
+
+/** Names the events of a custom set, in event order, or rejects an event the export lacks. */
+async function computeCustom(
+  pool: Pool,
+  requirements: { event_id: string; requirement: Requirement }[],
+): Promise<ComputedQualifications> {
+  const [rows] = await pool.query<EventRow[]>(
+    "SELECT id, name FROM events WHERE id IN (?) ORDER BY `rank`",
+    [requirements.map((entry) => entry.event_id)],
+  );
+  const missing = requirements.find((entry) => !rows.some((row) => row.id === entry.event_id));
+  if (missing) throw new QualificationInputError(`Unknown event ${missing.event_id}`);
+  const byEvent = new Map(requirements.map((entry) => [entry.event_id, entry.requirement]));
+  return computeLists(
+    pool,
+    null,
+    rows.map((row) => ({
+      event_id: row.id,
+      event_name: row.name,
+      requirement: byEvent.get(row.id)!,
+    })),
+  );
+}
+
 export async function qualificationIndexesReady(pool: Pool): Promise<boolean> {
   const [rows] = await pool.query<RowDataPacket[]>(
     `SELECT DISTINCT index_name FROM information_schema.statistics
@@ -517,18 +648,21 @@ export async function qualificationIndexesReady(pool: Pool): Promise<boolean> {
 
 /**
  * Serves a competition's qualification lists. Computing them reads every qualifying result,
- * so each competition is computed once per export and its pages are served from memory; the
- * few most recently viewed are kept. Concurrent requests for one competition share the work.
+ * so each competition or custom set is computed once per export and its pages are served
+ * from memory; the few most recently viewed are kept. Concurrent requests for one share the work.
  */
 export function createQualificationsService(pool: Pool) {
   const cache = new Map<string, ComputedQualifications | null>();
   const pending = new Map<string, Promise<ComputedQualifications | null>>();
 
-  const computed = async (competitionId: string) => {
+  const computed = async (
+    identity: unknown[],
+    compute: () => Promise<ComputedQualifications | null>,
+  ) => {
     const [[metadata]] = await pool.query<RowDataPacket[]>(
       "SELECT value FROM wca_statistics_metadata WHERE field = 'export_timestamp' LIMIT 1",
     );
-    const key = JSON.stringify([metadata?.value ?? null, competitionId.toLowerCase()]);
+    const key = JSON.stringify([metadata?.value ?? null, ...identity]);
     if (cache.has(key)) {
       const hit = cache.get(key)!;
       cache.delete(key);
@@ -537,12 +671,12 @@ export function createQualificationsService(pool: Pool) {
     }
     let work = pending.get(key);
     if (!work) {
-      work = computeQualifications(pool, competitionId)
+      work = compute()
         .then((value) => {
           // Without an export timestamp nothing says when the data changes, so keep nothing.
           if (metadata?.value) {
             cache.set(key, value);
-            while (cache.size > CACHED_COMPETITIONS) cache.delete(cache.keys().next().value!);
+            while (cache.size > CACHED_COMPUTATIONS) cache.delete(cache.keys().next().value!);
           }
           return value;
         })
@@ -552,20 +686,60 @@ export function createQualificationsService(pool: Pool) {
     return work;
   };
 
+  const region = async (regionId: string) => {
+    const resolved = await resolveRegion(pool, regionId);
+    if (!resolved) {
+      throw new QualificationInputError("region must be World, a continent or a country");
+    }
+    return resolved;
+  };
+
+  const page = (
+    result: ComputedQualifications,
+    list: string,
+    pageNumber: number,
+    regionId: string,
+    resolved: Region,
+  ) => {
+    if (list !== UNIQUE_LIST && !result.lists.has(list)) {
+      throw new QualificationInputError(
+        "list must be unique or an event with a checked requirement",
+      );
+    }
+    return servePage(pool, result, list, pageNumber, regionId, resolved);
+  };
+
   return {
-    async get(competitionId: string, list: string, page: number, regionId: string = WORLD) {
-      const region = await resolveRegion(pool, regionId);
-      if (!region) {
-        throw new QualificationInputError("region must be World, a continent or a country");
-      }
-      const result = await computed(competitionId);
+    /** A competition's own requirements, or null when there is no such competition. */
+    async get(competitionId: string, list: string, pageNumber: number, regionId: string = WORLD) {
+      const resolved = await region(regionId);
+      const result = await computed(["competition", competitionId.toLowerCase()], () =>
+        computeCompetition(pool, competitionId),
+      );
       if (!result) return null;
-      if (list !== UNIQUE_LIST && !result.lists.has(list)) {
-        throw new QualificationInputError(
-          "list must be unique or an event with a checked requirement at this competition",
-        );
-      }
-      return servePage(pool, result, list, page, regionId, region);
+      return page(result, list, pageNumber, regionId, resolved);
+    },
+
+    /** Requirements the user sets; see parseCustomRequirements for the format. */
+    async getCustom(
+      spec: string,
+      deadline: string | null,
+      list: string,
+      pageNumber: number,
+      regionId: string = WORLD,
+    ) {
+      const requirements = parseCustomRequirements(spec, deadline);
+      const resolved = await region(regionId);
+      // The same set written in another order is the same computation.
+      const identity = [
+        "custom",
+        deadline,
+        [...requirements]
+          .sort((a, b) => a.event_id.localeCompare(b.event_id))
+          .map(({ event_id, requirement }) => [event_id, requirement.result_type, requirement.level]),
+      ];
+      const result = await computed(identity, () => computeCustom(pool, requirements));
+      return page(result!, list, pageNumber, regionId, resolved);
     },
   };
 }

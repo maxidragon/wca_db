@@ -397,26 +397,22 @@ app.get("/api/competitions/search", ensureAuthenticated, async (req: Request, re
   }
 });
 
-app.get("/api/qualifications", ensureAuthenticated, async (req: Request, res: Response) => {
-  const competitionId = ((req.query.competition_id as string) || "").trim();
-  const list = ((req.query.list as string) || UNIQUE_LIST).trim();
-  const region = ((req.query.region as string) || WORLD).trim();
-  const page = req.query.page === undefined ? 1 : Number(req.query.page);
+function qualificationQuery(req: Request) {
+  return {
+    list: ((req.query.list as string) || UNIQUE_LIST).trim(),
+    region: ((req.query.region as string) || WORLD).trim(),
+    page: req.query.page === undefined ? 1 : Number(req.query.page),
+  };
+}
 
-  if (!competitionId || competitionId.length > 32) {
-    return res.status(400).json({ error: "A valid competition_id is required" });
-  }
-  if (!Number.isInteger(page) || page < 1) {
-    return res.status(400).json({ error: "page must be a positive integer" });
-  }
-
+async function sendQualifications(res: Response, load: () => Promise<unknown | null>) {
   try {
     if (!(await qualificationIndexesReady(pool))) {
       return res.status(503).json({
         error: "Qualification indexes not yet built. Run backend/qualification_indexes.sql.",
       });
     }
-    const qualifications = await qualificationsService.get(competitionId, list, page, region);
+    const qualifications = await load();
     if (!qualifications) {
       return res.status(404).json({ error: "Competition not found" });
     }
@@ -429,6 +425,37 @@ app.get("/api/qualifications", ensureAuthenticated, async (req: Request, res: Re
     console.error("Qualifications query failed", err);
     res.status(500).json({ error: "Could not load the qualifications" });
   }
+}
+
+app.get("/api/qualifications", ensureAuthenticated, async (req: Request, res: Response) => {
+  const competitionId = ((req.query.competition_id as string) || "").trim();
+  const { list, region, page } = qualificationQuery(req);
+
+  if (!competitionId || competitionId.length > 32) {
+    return res.status(400).json({ error: "A valid competition_id is required" });
+  }
+  if (!Number.isInteger(page) || page < 1) {
+    return res.status(400).json({ error: "page must be a positive integer" });
+  }
+  await sendQualifications(res, () =>
+    qualificationsService.get(competitionId, list, page, region)
+  );
+});
+
+app.get("/api/qualifications/custom", ensureAuthenticated, async (req: Request, res: Response) => {
+  const requirements = ((req.query.requirements as string) || "").trim();
+  const deadline = ((req.query.deadline as string) || "").trim() || null;
+  const { list, region, page } = qualificationQuery(req);
+
+  if (!requirements || requirements.length > 1000) {
+    return res.status(400).json({ error: "requirements are required" });
+  }
+  if (!Number.isInteger(page) || page < 1) {
+    return res.status(400).json({ error: "page must be a positive integer" });
+  }
+  await sendQualifications(res, () =>
+    qualificationsService.getCustom(requirements, deadline, list, page, region)
+  );
 });
 
 app.get("/api/achievements", ensureAuthenticated, async (req: Request, res: Response) => {
