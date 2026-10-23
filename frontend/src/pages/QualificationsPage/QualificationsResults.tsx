@@ -156,7 +156,7 @@ export default function QualificationsResults({
       {current && current.events.length > 0 && (
         <>
           <div className="mb-3 flex flex-wrap items-center gap-x-6 gap-y-2">
-          <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+          <label className="flex min-w-0 flex-wrap items-center gap-2 text-sm font-medium text-gray-700">
             Region
             <select
               aria-label="Region"
@@ -164,7 +164,7 @@ export default function QualificationsResults({
               onChange={(e) =>
                 update({ region: e.target.value === WORLD ? null : e.target.value, page: null })
               }
-              className="rounded border border-gray-300 bg-white px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-400"
+              className="max-w-full rounded border border-gray-300 bg-white px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-400"
             >
               <option value={WORLD}>World</option>
               {(["continent", "country"] as const).map((kind) => (
@@ -181,7 +181,7 @@ export default function QualificationsResults({
             </select>
             <span className="font-normal text-gray-500">by current nationality</span>
           </label>
-          <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+          <label className="flex min-w-0 flex-wrap items-center gap-2 text-sm font-medium text-gray-700">
             Competed
             <select
               aria-label="Competed"
@@ -205,7 +205,7 @@ export default function QualificationsResults({
                   page: null,
                 });
               }}
-              className="rounded border border-gray-300 bg-white px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-400"
+              className="max-w-full rounded border border-gray-300 bg-white px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-400"
             >
               <option value="">Any time</option>
               {COMPETED_PRESETS.map((preset) => (
@@ -221,7 +221,7 @@ export default function QualificationsResults({
                 aria-label="Competed since"
                 value={competed}
                 onChange={(e) => e.target.value && update({ competed: e.target.value, page: null })}
-                className="rounded border border-gray-300 bg-white px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                className="max-w-full rounded border border-gray-300 bg-white px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-400"
               />
             )}
           </label>
