@@ -38,7 +38,7 @@ function defaultResultType(event: EventOption | undefined): ResultType {
 }
 
 const fieldClass =
-  "rounded border border-gray-300 bg-white px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400";
+  "max-w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400";
 
 /**
  * Builds a set of requirements: one per event, each a limit to beat or any successful result,
@@ -211,7 +211,7 @@ export default function CustomRequirementsForm({
           >
             Add event
           </button>
-          <label className="flex items-center gap-2 text-sm text-gray-700">
+          <label className="flex flex-wrap items-center gap-2 text-sm text-gray-700">
             Results by
             <input
               type="date"
