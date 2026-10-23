@@ -10,11 +10,13 @@ import SavedViews from "./SavedViews";
 import {
   COMPETED_PRESETS,
   competedSinceDate,
+  customFromCompetition,
   decodeCustom,
   encodeCustom,
   viewParams,
   UNIQUE_LIST,
   WORLD,
+  type CustomRequirement,
   type EventOption,
   type QualificationsResult,
   type Region,
@@ -102,6 +104,8 @@ const QualificationsPage = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [regions, setRegions] = useState<Region[]>([]);
   const [events, setEvents] = useState<EventOption[]>([]);
+  // The competition whose requirements are open for editing; another competition closes the form.
+  const [editing, setEditing] = useState<string | null>(null);
   const url = source ? pageUrl(source, list, region, competedSince, page) : "";
   // Read while rendering, so a page already here is drawn in the same frame as the click that
   // asked for it, instead of one frame later once an effect has stored it.
@@ -225,6 +229,17 @@ const QualificationsPage = () => {
     return filters.length > 0 ? `${base} (${filters.join(", ")})` : base;
   };
 
+  const showCustom = (set: CustomRequirement[], until: string) =>
+    showSource({
+      mode: CUSTOM_MODE,
+      requirements: encodeCustom(set),
+      ...(until ? { deadline: until } : {}),
+    });
+  const editable =
+    current?.competition && editing === current.competition.id
+      ? customFromCompetition(current.events)
+      : null;
+
   const modeClass = (active: boolean) =>
     `cursor-pointer rounded px-3 py-1.5 font-medium transition-colors ${
       active ? "bg-blue-100 text-blue-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
@@ -269,13 +284,7 @@ const QualificationsPage = () => {
           initial={decodeCustom(requirements)}
           initialDeadline={deadline}
           disabled={isLoading || events.length === 0}
-          onSubmit={(set, until) =>
-            showSource({
-              mode: CUSTOM_MODE,
-              requirements: encodeCustom(set),
-              ...(until ? { deadline: until } : {}),
-            })
-          }
+          onSubmit={showCustom}
         />
       ) : (
         <>
@@ -286,17 +295,43 @@ const QualificationsPage = () => {
             onSelect={(id) => showSource({ competition_id: id })}
           />
           {current?.competition && (
-            <div className="mb-6">
-              <a
-                href={`${WCA_ORIGIN}/competitions/${current.competition.id}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xl font-semibold text-gray-900 hover:underline"
-              >
-                {current.competition.name}
-              </a>
-              <p className="text-sm text-gray-500">{formatDate(current.competition.start_date)}</p>
+            <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <a
+                  href={`${WCA_ORIGIN}/competitions/${current.competition.id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xl font-semibold text-gray-900 hover:underline"
+                >
+                  {current.competition.name}
+                </a>
+                <p className="text-sm text-gray-500">
+                  {formatDate(current.competition.start_date)}
+                </p>
+              </div>
+              {!editable && (
+                <button
+                  type="button"
+                  disabled={events.length === 0}
+                  onClick={() => setEditing(current.competition!.id)}
+                  className="cursor-pointer rounded border border-gray-300 bg-white px-3 py-1.5 text-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Edit requirements
+                </button>
+              )}
             </div>
+          )}
+          {editable && (
+            // Editing turns the competition's requirements into a custom set; its lists stay
+            // shown until the edited set is submitted.
+            <CustomRequirementsForm
+              events={events}
+              initial={editable.requirements}
+              initialDeadline={editable.deadline}
+              disabled={isLoading}
+              onSubmit={showCustom}
+              onCancel={() => setEditing(null)}
+            />
           )}
         </>
       )}
