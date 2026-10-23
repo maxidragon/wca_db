@@ -10,6 +10,8 @@ Requirements come from the developer dump's `competition_events.qualification`, 
 
 The **Custom** mode answers the same question for requirements you set yourself: pick events, and for each a single or an average under a limit, or any successful result, with one optional deadline for all of them. Events decided by averages start on the average, and blindfolded events on the single. Times are typed the way WCA Live takes them, digits only and read from the right, so `750` is 7.50 and `12345` is 1:23.45; Fewest Moves takes moves and Multi-Blind the fewest points that qualify. The lists, the unique list and the region filter work as for a competition, and the requirements are kept in the URL, so a set can be shared. Top N cannot be set, since who meets it depends on who registers.
 
+A competition's requirements can be edited the same way: **Edit requirements** opens the form filled with them, and showing the edited set switches to Custom. A top N requirement is left out. The form takes one deadline; when the competition's events have different ones, it starts with the latest. A Multi-Blind limit that also has a time, as the WCA's do, starts at the next whole point.
+
 ## Your own row and saved views
 
 A logged-in competitor with a WCA ID sees their own row pinned above every list, highlighted, with the place they hold in the list as filtered, whichever page is open; on a list they are not in, the row says so, so the table keeps its height between lists. The WCA ID comes from the login, or for a session from before it was stored there, from the dump's users table.

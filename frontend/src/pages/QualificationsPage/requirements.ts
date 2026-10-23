@@ -186,6 +186,30 @@ export function decodeCustom(spec: string): CustomRequirement[] {
 }
 
 /**
+ * A competition's requirements as a custom set, to start editing from. Only the checked ones
+ * carry over: top N cannot be set, so it is left out. A custom set has one deadline; a competition's events almost always share
+ * theirs, and when they do not, the latest one applies to every event.
+ */
+export function customFromCompetition(events: EventRequirement[]): {
+  requirements: CustomRequirement[];
+  deadline: string;
+} {
+  const kept = events.filter((event) => event.count !== null);
+  return {
+    requirements: kept.map(({ event_id, requirement }) => ({
+      eventId: event_id,
+      resultType: requirement.result_type,
+      level: requirement.type === "anyResult" ? null : requirement.level,
+    })),
+    deadline: kept.reduce(
+      (latest, { requirement }) =>
+        requirement.when_date && requirement.when_date > latest ? requirement.when_date : latest,
+      "",
+    ),
+  };
+}
+
+/**
  * The competed-since filter as the URL and saved views keep it: a preset that stays relative to
  * today, or a fixed date. "this-year" saved in one year still means the current one in the next.
  */

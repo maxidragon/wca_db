@@ -50,12 +50,15 @@ export default function CustomRequirementsForm({
   initialDeadline,
   disabled,
   onSubmit,
+  onCancel,
 }: {
   events: EventOption[];
   initial: CustomRequirement[];
   initialDeadline: string;
   disabled: boolean;
   onSubmit: (requirements: CustomRequirement[], deadline: string) => void;
+  /** Offers to leave the form, when it was opened from something else. */
+  onCancel?: () => void;
 }) {
   // Rows are found by key when edited, so two rows sharing one would change together. The counter
   // lives with the rows, so a hot reload that keeps the rows keeps it too, instead of restarting
@@ -220,13 +223,24 @@ export default function CustomRequirementsForm({
             <span className="text-gray-500">{deadline ? "" : "any date"}</span>
           </label>
         </div>
-        <button
-          type="submit"
-          disabled={disabled}
-          className="cursor-pointer rounded-lg bg-blue-500 px-5 py-2 text-white hover:bg-blue-600 disabled:cursor-not-allowed disabled:bg-gray-400"
-        >
-          Show qualifiers
-        </button>
+        <div className="flex items-center gap-2">
+          {onCancel && (
+            <button
+              type="button"
+              onClick={onCancel}
+              className="cursor-pointer rounded-lg px-4 py-2 text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+            >
+              Cancel
+            </button>
+          )}
+          <button
+            type="submit"
+            disabled={disabled}
+            className="cursor-pointer rounded-lg bg-blue-500 px-5 py-2 text-white hover:bg-blue-600 disabled:cursor-not-allowed disabled:bg-gray-400"
+          >
+            Show qualifiers
+          </button>
+        </div>
       </div>
     </form>
   );
