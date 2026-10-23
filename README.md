@@ -1,89 +1,56 @@
 # WCA DB
 
-Tools for querying and exploring the WCA developer database. The React frontend lives in `frontend/`; the Express backend lives in `backend/` and uses MariaDB.
+Tools for querying and exploring the WCA developer database export: a SQL console, statistics, and pages about competitors and competitions. Every tool requires logging in with a WCA account. The database is reimported every night, so results follow the latest export.
 
-## Statistics
+## Features
 
-The **Statistics** navigation tab (`/statistics`) provides 19 views for exploring this project’s imported WCA database. WCA login is required, as with the other tools.
+**Query Tool** (`/`): run read-only SQL against the whole export. `SELECT`, `WITH` and `DESCRIBE` are allowed. Table and column names are autocompleted from the schema. Results are paginated, an explicit `LIMIT` can be at most 100, and a query that runs longer than the time limit is cancelled. Queries can use `:parameters`, be saved in the browser, and be shared as a link. [Details](docs/query-tool.md)
 
-| Statistics | Filters |
-| --- | --- |
-| Sum of ranks | Region, gender, events, single/average |
-| Sum of country ranks | Gender, events, single/average |
-| Medal collection | Region, gender, year, events |
-| Top 100 results and appearances | Region, gender, year, event, single/average |
-| Best podiums | Competition region, year, event |
-| Records by competitor and competition | Region, gender, year, events |
-| Oldest standing records | Region, gender, events, single/average |
-| Most competitions and most persons | Region, gender, year, events |
-| Personal solves, personal solves in one competition, competition solves | Region, gender, year, events |
-| Uncrowned kings and podium missers | Region, gender, event |
-| Record missers | Region, gender, event, single/average |
-| All events achiever | Region, gender |
-| Most nth place | Region, gender, year, events, 2nd/4th, include DNF/DNS |
+**Statistics** (`/statistics`): 19 rankings across the whole export, including sum of ranks, medal collections, top 100 results, best podiums, records, oldest standing records, most competitions, personal solves, uncrowned kings, record missers and all-events achievers. Each can be filtered by region, gender, year and events. Filters are stored in the URL, so a view can be shared. [Details](docs/statistics.md)
 
-Selecting one event provides the per-event medal and placement variants; selecting a year provides yearly personal-solve standings. The **2×2 to 5×5** preset provides the corresponding rank-sum variants. Selected filters and pagination are stored in the URL. Opening the page, including a filtered URL, restores the filters without querying statistics. Click **Show statistics** to load results. After submission, pagination and browser history load the selected results; **Reset filters** clears results and returns to the idle state.
+### Competitors
 
-Region supports the world, all continents, and all countries in the export. Competition statistics use the competition location. Competitor statistics use current nationality for rank sums, medals, solves, and all-events completion, and nationality at the time of the result for attendance, placements, top-100 results, records set, and missers. Year filters use competition start dates. Gender selects competitors while retaining official placements and regional event ranks.
+**Person** (`/person`): one competitor at a glance. It shows personal bests with world, continental and national ranks, every competition they have results from, who they compete with most, where they compete, and counts of competitions, solves, medals, records and their longest PR streak. [Details](docs/person.md)
 
-Top-100 singles count individual attempts rather than round bests and include all ties at the cutoff. Average results show their individual attempts. Solve statistics distinguish successful attempts from DNF/DNS attempts and unused zero slots. Medal counts use successful finals; nth-place counts include all rounds. Missing events in rank sums receive the last regional/world rank plus one. All-events completion requires successful singles and every available average in current events, and measures days from the first competition to completion.
+**Nemeses** (`/nemeses`): everyone who ranks better than a competitor in every event they hold a rank in. This is the definition [Nemesizer](https://www.nemesizer.com/) uses. The list can be narrowed to the competitor's continent or country. [Details](docs/nemeses.md)
 
-Best podiums use official WCA finals, including successful-attempt means for Fewest Moves and points for Multi-Blind. Combined dual Fewest Moves results require competition metadata outside the WCA export and are not reconstructed. Standing-record age is measured at the developer export date.
+**Relations** (`/relations`): the shortest chain of competitors linking two people, where each step is two people who competed at the same competition. Each link lists the competitions the pair shared. Competitions held across several locations at once do not link people, because their competitors never met. This covers multi-location Fewest Moves competitions and those under a multi-country region. [Details](docs/relations.md)
 
-The API exposes authenticated `GET /api/statistics/options` and `GET /api/statistics`. The latter accepts a `statistic` ID, its supported filters, `page` (default 1), and `page_size` (default 50, maximum 100). Multiple events use a comma-separated `events` value. Unsupported or invalid filters return 400. Queries use MariaDB’s database-enforced statement timeout (`QUERY_TIMEOUT_SECONDS`, default 60 seconds, capped at 300 for statistics), and raise the temporary-table ceiling for the statement only (`STATISTICS_MEMORY_MB`, default 64, clamped to 16–1024). A statistic groups the whole export into a temporary table, which spills to disk at MariaDB’s 16 MB default and costs three to four times the runtime; 32 MB already recovers nearly all of it. The ceiling is charged per statement against a pool of ten, so budget for ten times the value. Sort and join buffers stay at 2 MB and 4 MB whatever it is set to, because Linux allocates a sort buffer per sort and a larger one measures slower rather than faster. Raising the ceiling to 256 MB is worth roughly four times on “most personal solves in one competition”, whose intermediate is the one large enough to need it; every other statistic is at full speed by 64 MB. Results are cached in chunks of ten adjacent pages, so pagination reuses the same computation. Chunk storage is limited to 100 entries and 10,000 rows, with at most 100 individual page responses retained. Cache keys use the export timestamp and canonical event selections; results stay valid for that export until evicted. The export timestamp is checked once per minute, and unchanged exports reuse the existing filter metadata. An updated export clears cached chunks and pages; without an export timestamp, chunks expire after five minutes. Concurrent requests for pages in the same chunk share a computation.
+**Competitions Together** (`/competitions-together`): every competition two competitors both have results from, and every final podium they stood on together. [Details](docs/competitions-together.md)
 
-Attendance and solve statistics read `statistics_entries`, one row per competitor, competition and event carrying that entry's successful and attempted solves, with nationality at the time in the key. Aggregating five million entries replaces joining seven million results to thirty-two million attempts, and the key orders competition-first so a year or competition-region filter becomes a prefix range; a second index orders it competitor-first and covers the attendance count outright. `update_database.sh` builds the table into the staging database before the swap, so it always matches the export it was computed from. Deploys do not import, so they run `compute_statistics_entries.sh --if-missing`, which builds the table for a database last imported before it existed and costs one query once it does. Run `backend/compute_statistics_entries.sh [database]` by hand to rebuild it outright. Until the table exists `GET /api/statistics` returns 503 saying which script to run.
+**Best Ever Ranks** (`/best-ever-ranks`): the best world, continental and national rank a competitor ever held in each event, single and average, with the result and the competition that set it. These are not their current ranks: a rank held years ago and since lost still counts. The table is computed after each import. [Details](docs/best-ever-ranks.md)
 
-Queries join `persons`, `countries` and `competitions` only where a filter or an output value reads them, and attach names after grouping rather than carrying them through it, so an unfiltered statistic aggregates rows from one table alone. Server memory is the remaining limit: the export is around 15 GB against MariaDB’s default 128 MB `innodb_buffer_pool_size`, so every statistic reads from disk. Raising the buffer pool to a few GB is the largest single improvement available and needs no change here.
+### Competitions
 
-## Person
+**Achievements** (`/achievements`): milestones reached at a competition. These are competitors reaching their 100th, 150th, … competition, Delegates reaching their 100th, … delegated competition, competitors crossing successful-attempt milestones, and pairs reaching 100, 150 or 200 competitions together. For a competition that has not finished yet, it uses accepted registrations to show who is likely to reach a milestone. [Details](docs/achievements.md)
 
-The **Person** navigation tab (`/person`) takes a WCA ID and shows what one competitor’s results say about them: their personal bests with world, continental and national ranks; every competition they have results from; the competitors they have shared the most competitions with; their most visited venues and cities; every country they have competed in; and their competitions per year. Alongside those it counts competitions, countries, events, successful and attempted solves, finals medals, records by scope, and their longest streak of competitions with a personal record.
+**Qualifications** (`/qualifications`): for a competition with qualification requirements, everyone who meets them, checked the way the WCA checks them at registration. There is one list per event and one list of unique competitors. Custom mode takes requirements you set yourself. Lists can be filtered by region and by who has competed recently, and saved as views. [Details](docs/qualifications.md)
 
-Medals count official finals whose single was successful, so a final nobody solved is not a podium; a round won before the final is not a medal either. Records count the world, continental and national markers on both the single and the average of a result. Venue names are the labels of the links the export stores, so the same hall groups together whatever the link says. Competitions are those with results — an upcoming registration is not one. The competition table shows events and rounds as competed in / total at the competition, counting recorded results (including DNF/DNS). Each distinct event and round-type pair counts as one round, regardless of how many people entered it. Attendance shared with another competitor counts competitions, not results. Each competition also counts the personal records it set: an event's single or average counts when its best there beats every earlier competition, a competitor's first valid result included, and at most once per competition however many rounds improved it. The longest PR streak is the most consecutive competitions that each set at least one.
+## Getting started
 
-The API exposes an authenticated `GET /api/person?wca_id=…`, which answers the whole page in one response: an unknown ID returns 404, a malformed one 400. It reads `statistics_entries` for attendance and solves, so it returns 503 naming the script to run until that table exists. The heaviest competitor in the export, with more than four hundred competitions, costs a few hundred milliseconds: every query is keyed by the competitor, and the shared-competition count reads the entry table competition-first, which its primary key orders.
-
-## Nemeses
-
-The **Nemeses** navigation tab (`/nemeses`) takes a WCA ID and lists every competitor who holds a better official world rank than them in every single and every average they hold a rank in, the definition [Nemesizer](https://www.nemesizer.com/) uses. An event the competitor has no average in asks only for a better single. An equal rank is an equal result, so a tie is not a nemesis. Ranks come from the official `ranks_single` and `ranks_average` tables, so deprecated events a competitor still holds a rank in count too. The region switch limits the list to nemeses from the competitor's current continent or country and shows the count for each.
-
-The API exposes an authenticated `GET /api/nemeses?wca_id=…&region=world|continent|country&page=…`, returning 100 nemeses a page ordered by name, with the counts for all three regions. An unknown ID returns 404; a malformed ID, region or page returns 400. The query starts from the competitor's best world rank, which caps the candidates at that many people, and checks each candidate's other ranks by person. A world-class competitor costs milliseconds; a beginner, with nemeses numbering in the hundreds of thousands, costs about a second. Both read `rank_indexes.sql`, which orders each rank table by event and world rank. The import builds those indexes, and every deploy runs the file too. It is idempotent, so it only does work on a database imported before the indexes existed. The ranks export can be newer than the developer dump, so a nemesis without a person row yet is listed under the world by WCA ID.
-
-## Qualifications
-
-The **Qualifications** navigation tab (`/qualifications`) takes a competition with qualification requirements and lists everyone who meets them: one list per event, and one list of unique competitors who meet at least one requirement, ordered by how many they meet. The search only offers competitions that have requirements. A region filter limits every list and count to competitors currently from a continent or country; a competitor the persons table does not have yet is only listed for the world. A competed filter keeps only those with a result at a competition that ended on or after a date: this year, the last 12 or 24 months, or a date of your choice. The presets stay relative to today, so a view saved with "this year" means the current year whenever it is opened.
-
-Requirements come from the developer dump's `competition_events.qualification`, and are checked the way the WCA checks them at registration: only results from competitions that ended on or before the requirement's deadline count. "Any result" asks for a successful single or average, and a time, move or points limit asks for a result strictly better than it, so a result equal to the limit does not qualify. Each event lists the competitor's best result by the deadline and the competition where they first achieved it. A top N requirement is shown but not listed, and does not count towards the unique list: it admits the N best registered competitors by single or average, so who meets it depends on who registers. A malformed requirement is left out.
-
-The **Custom** mode answers the same question for requirements you set yourself: pick events, and for each a single or an average under a limit, or any successful result, with one optional deadline for all of them. Events decided by averages start on the average, and blindfolded events on the single. Times are typed the way WCA Live takes them, digits only and read from the right, so `750` is 7.50 and `12345` is 1:23.45; Fewest Moves takes moves and Multi-Blind the fewest points that qualify. The lists, the unique list and the region filter work as for a competition, and the requirements are kept in the URL, so a set can be shared. Top N cannot be set, since who meets it depends on who registers.
-
-A logged-in competitor with a WCA ID sees their own row pinned above every list, highlighted, with the place they hold in the list as filtered, whichever page is open; on a list they are not in, the row says so, so the table keeps its height between lists. The WCA ID comes from the login, or for a session from before it was stored there, from the dump's users table.
-
-Either mode, with its filters, can be saved as a view, the way the Query Tool saves queries: views are kept in the browser, shown as chips to open, rename or remove, and named after what they show until renamed.
-
-The API exposes an authenticated `GET /api/qualifications?competition_id=…&list=unique|<event id>&region=…&page=…`, returning 100 competitors a page with every requirement and its count. `region` takes the same ids as the statistics, `World` by default, a continent or a country, and `competed_since=YYYY-MM-DD` keeps competitors with a result at a competition that ended on or after that date. An unknown competition returns 404; a malformed page, an unknown region, or a list that is not a checked event at the competition, returns 400. `GET /api/qualifications/custom?requirements=…&deadline=YYYY-MM-DD&list=…&region=…&page=…` does the same for a custom set: `requirements` is comma-separated `event:single|average:limit`, where the limit is the attempt result a qualifying result must be strictly better than, or `any`; at most one per event and twenty in all. Without `deadline` every result counts. Both return the logged-in competitor's WCA ID and name as `viewer_wca_id` and `viewer_name`, and as `viewer` their row and place in the filtered list, or null when they are not in it. A malformed set, an unknown event, or a malformed deadline returns 400. `GET /api/competitions/search` takes `with_qualifications=1` to limit the search to competitions with requirements. A lenient requirement in a popular event is met by over a hundred thousand competitors, so a competition or custom set is computed once per export, a few events at a time, and its pages are served from memory for the five most recently viewed; a region filters the cached lists, which costs milliseconds. Who competed since a date is one indexed read of the competitions since then and their results, about a second for a year, kept per export for the four most recent dates. A national championship with a dozen requirements takes a few seconds the first time and milliseconds after that. The lists read `qualification_indexes.sql`, which orders results by event and single or average and covers the competition and person, so no table row is read. The import builds those indexes and every deploy runs the file; until they exist the endpoint returns 503 naming the file.
-
-## Query Tool
-
-The **Query Tool** runs SQL its signed-in users write: `SELECT`, `WITH … SELECT` and `DESC`/`DESCRIBE`, at most 100 rows per page. Checking the first word is a convenience, not the security boundary; the database is. `POST /api/query` and `GET /api/schema` use a pool of their own that connects as a dedicated read-only user, `QUERY_DB_USER` / `QUERY_DB_PASS`, which holds `SELECT` on `DB_NAME` and nothing else: no `FILE`, so a query can neither read nor write files on the database host, no write or schema rights, and no other database. `SELECT` alone covers `DESC` on tables and views and their `INFORMATION_SCHEMA` rows, so the user needs no `SHOW VIEW`. Every statement, `DESC` included, runs under MariaDB's statement timeout (`QUERY_TIMEOUT_SECONDS`, default 60), and the user carries a 60 second `MAX_STATEMENT_TIME` of its own as a backstop.
-
-Create the user once per server with `backend/create_query_user.sh`, which reads `.env`, connects as `DB_USER` (or `ADMIN_DB_USER` / `ADMIN_DB_PASS`), and runs `backend/query_user.sql`. Re-running it updates the password and strips any privilege granted to the user by hand. Deploys do not run it, because creating users takes an account that can grant. The tool fails closed: until `QUERY_DB_USER` is set, or if it names `DB_USER` or `root`, both endpoints return 503 and the backend logs why at startup. It never falls back to the app's own connection.
-
-## Development and validation
-
-Install dependencies in both directories with `npm ci`. Configure `backend/.env` using `backend/.env.example`, import WCA data with `backend/update_database.sh`, and run `npm run dev` in each directory. The import combines the developer dump with the official `ranks_single` and `ranks_average` files from the results TSV export, then builds `statistics_entries`, the `linkings` the relations page reads and `best_ever_ranks`, all in the staging database, so each is swapped in with the export it was computed from and none is ever missing from the live one. Build the backend with `npm run build` first: the best ever ranks run from it. The exports are generated independently, so their separate timestamps are stored as metadata. An existing database needs `backend/compute_statistics_entries.sh` once, which takes a few minutes. `backend/compute_linkings.sh [--if-missing] [database]` and `backend/compute_best_ever_ranks.sh [--if-missing] [database]` rebuild the other two by hand, about ten and fifteen minutes on the full export; each builds a new table and renames it into place, so the page keeps serving the previous one meanwhile. Deploys run both with `--if-missing`. The Query Tool needs its read-only user, created with `backend/create_query_user.sh` once `QUERY_DB_USER` and `QUERY_DB_PASS` are set.
-
-Build both packages with `npm run build` from their respective directories. Frontend lint runs with `npm run lint`.
-
-Run the tests from `backend/`:
+The frontend (`frontend/`) is React with Vite; the backend (`backend/`) is Express on MariaDB.
 
 ```sh
-npm test               # every test file; npm run test:statistics runs the statistics ones alone
-# Run the MariaDB integration tests using an explicitly selected test server:
-TEST_DB_SOCKET=/path/to/test-mariadb.sock npm test
+cd backend
+npm ci
+cp .env.example .env        # database credentials and a WCA OAuth application
+./update_database.sh        # downloads and imports the WCA exports; takes a while
+./create_query_user.sh      # the read-only user the Query Tool runs SQL as
+npm run dev
+
+cd ../frontend
+npm ci
+npm run dev
 ```
 
-Without `TEST_DB_SOCKET`, filter-validation and cache-behavior tests run and database integration tests are skipped; the person tests are integration tests throughout. Integration tests create a uniquely named fixture database on the supplied socket using its local root account, exercise every statistic and filter combination, check calculations and pagination, and drop only that fixture database afterward. They never load the project’s `.env` or use its production connection settings.
+## Tests
 
-Every pull request, and every push to `main`, runs these same checks: the backend tests against a MariaDB installed on the runner, and the frontend lint and build. The workflow uses GitHub-hosted runners rather than the self-hosted one the deploy and import workflows use, so a test run never touches the server holding the imported export.
+```sh
+cd backend
+npm test                                          # unit tests; integration tests are skipped
+TEST_DB_SOCKET=/path/to/test-mariadb.sock npm test  # also runs the MariaDB integration tests
+```
+
+The integration tests create and drop their own fixture database on the server you name, and never read `.env`. Lint and build the frontend with `npm run lint` and `npm run build`. CI runs all of these on every pull request.
+
+Notes for contributors, human or agent, are in [AGENTS.md](AGENTS.md).
