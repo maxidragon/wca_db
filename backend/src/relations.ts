@@ -156,3 +156,40 @@ export async function podiumsTogether(
   );
   return rows as PodiumTogether[];
 }
+
+export interface CompetitionTogether {
+  id: string;
+  name: string;
+  start_date: string | null;
+}
+
+const STAFF_ASSIGNMENTS = {
+  delegated: { table: "competition_delegates", userColumn: "delegate_id" },
+  organized: { table: "competition_organizers", userColumn: "organizer_id" },
+} as const;
+
+/**
+ * Competitions both people delegated or organized. Assignments exist long before a
+ * competition is held, so cancelled ones and those yet to start do not count.
+ */
+export async function staffedTogether(
+  pool: Pool,
+  role: keyof typeof STAFF_ASSIGNMENTS,
+  wcaId1: string,
+  wcaId2: string
+): Promise<CompetitionTogether[]> {
+  const { table, userColumn } = STAFF_ASSIGNMENTS[role];
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT c.id, c.name, DATE_FORMAT(c.start_date, '%Y-%m-%d') AS start_date
+     FROM users u1
+     JOIN ${table} a1 ON a1.${userColumn} = u1.id
+     JOIN ${table} a2 ON a2.competition_id = a1.competition_id
+     JOIN users u2 ON u2.id = a2.${userColumn}
+     JOIN competitions c ON c.id = a1.competition_id
+     WHERE u1.wca_id = ? AND u2.wca_id = ?
+       AND c.cancelled_at IS NULL AND c.start_date <= CURDATE()
+     ORDER BY c.start_date DESC, c.id`,
+    [wcaId1, wcaId2]
+  );
+  return rows as CompetitionTogether[];
+}

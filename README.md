@@ -16,7 +16,7 @@ Tools for querying and exploring the WCA developer database export: a SQL consol
 
 **Relations** (`/relations`): the shortest chain of competitors linking two people, where each step is two people who competed at the same competition. Each link lists the competitions the pair shared. Competitions held across several locations at once do not link people, because their competitors never met. This covers multi-location Fewest Moves competitions and those under a multi-country region. [Details](docs/relations.md)
 
-**Competitions Together** (`/competitions-together`): every competition two competitors both have results from, and every final podium they stood on together. [Details](docs/competitions-together.md)
+**Competitions Together** (`/competitions-together`): every competition two competitors both have results from, every final podium they stood on together, and every competition they delegated or organized together. [Details](docs/competitions-together.md)
 
 **Best Ever Ranks** (`/best-ever-ranks`): the best world, continental and national rank a competitor ever held in each event, single and average, with the result and the competition that set it. These are not their current ranks: a rank held years ago and since lost still counts. The table is computed after each import. [Details](docs/best-ever-ranks.md)
 
