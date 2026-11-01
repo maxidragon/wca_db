@@ -6,7 +6,7 @@ import morgan from "morgan";
 import mysql, { RowDataPacket } from "mysql2/promise";
 import session from "express-session";
 import { loginWithWca, ensureAuthenticated } from "./wca_oauth";
-import { getChain, competitionsTogether, podiumsTogether } from "./relations";
+import { getChain, competitionsTogether, podiumsTogether, staffedTogether } from "./relations";
 import { getCompetitionAchievements, searchCompetitions } from "./achievements";
 import { bestEverRanksReady, getBestEverRanks } from "./best_ever_ranks";
 import { getPersonProfile } from "./person";
@@ -225,6 +225,8 @@ app.get("/api/competitions-together", ensureAuthenticated, async (req: Request, 
       [wca_id1, wca_id2]
     );
     const podiums = await podiumsTogether(pool, wca_id1, wca_id2);
+    const delegated = await staffedTogether(pool, "delegated", wca_id1, wca_id2);
+    const organized = await staffedTogether(pool, "organized", wca_id1, wca_id2);
 
     const personMap: Record<string, string> = {};
     for (const p of persons as RowDataPacket[]) {
@@ -236,6 +238,8 @@ app.get("/api/competitions-together", ensureAuthenticated, async (req: Request, 
       person2: { wca_id: wca_id2, name: personMap[wca_id2] },
       competitions,
       podiums,
+      delegated,
+      organized,
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
