@@ -10,7 +10,7 @@ Tools for querying and exploring the WCA developer database export: a SQL consol
 
 ### Competitors
 
-**Person** (`/person`): one competitor at a glance. It shows personal bests with world, continental and national ranks, every competition they have results from, every competition they have delegated, who they compete with most, where they compete, and counts of competitions, solves, medals, records and their longest PR streak. [Details](docs/person.md)
+**Person** (`/person`): one competitor at a glance. It shows personal bests with world, continental and national ranks, every competition they have results from, every competition they have delegated or organized, who they compete with most, where they compete, and counts of competitions, solves, medals, records and their longest PR streak. [Details](docs/person.md)
 
 **Nemeses** (`/nemeses`): everyone who ranks better than a competitor in every event they hold a rank in. This is the definition [Nemesizer](https://www.nemesizer.com/) uses. The list can be narrowed to the competitor's continent or country. [Details](docs/nemeses.md)
 
