@@ -28,9 +28,10 @@ export interface PersonCompetition {
   solves: number;
   attempts: number;
   personal_records: number;
+  number: number;
 }
 
-export interface DelegatedCompetition {
+export interface StaffedCompetition {
   id: string;
   name: string;
   start_date: string;
@@ -66,7 +67,8 @@ export interface PersonProfile {
   };
   personal_bests: PersonalBest[];
   competitions: PersonCompetition[];
-  delegated: DelegatedCompetition[];
+  delegated: StaffedCompetition[];
+  organized: StaffedCompetition[];
   competitors: { wca_id: string; name: string; competitions: number }[];
   venues: {
     venue: string;

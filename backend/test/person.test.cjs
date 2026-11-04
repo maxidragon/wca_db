@@ -46,6 +46,7 @@ before(async () => {
     "CREATE TABLE competitions (id VARCHAR(40) PRIMARY KEY,name VARCHAR(50),country_id VARCHAR(30),city_name VARCHAR(50),venue VARCHAR(240),start_date DATE,end_date DATE,cancelled_at DATETIME)",
     "CREATE TABLE users (id INT PRIMARY KEY,wca_id VARCHAR(10))",
     "CREATE TABLE competition_delegates (competition_id VARCHAR(40),delegate_id INT)",
+    "CREATE TABLE competition_organizers (competition_id VARCHAR(40),organizer_id INT)",
     "CREATE TABLE results (id INT PRIMARY KEY,person_id VARCHAR(10),country_id VARCHAR(30),competition_id VARCHAR(40),event_id VARCHAR(10),round_type_id VARCHAR(2),pos INT,best INT,average INT,regional_single_record VARCHAR(5),regional_average_record VARCHAR(5))",
     "CREATE TABLE result_attempts (result_id INT,attempt_number INT,value INT,PRIMARY KEY(result_id,attempt_number))",
     "CREATE TABLE ranks_single (person_id VARCHAR(10),event_id VARCHAR(10),best INT,world_rank INT,continent_rank INT,country_rank INT,PRIMARY KEY(person_id,event_id))",
@@ -75,6 +76,12 @@ before(async () => {
     `INSERT INTO competition_delegates VALUES
        ('Warsaw2025',1),('Beijing2026',1),('Krakow2026',1),('Krakow2026',3),
        ('Lublin2099',1),('Opole2025',1)`,
+    // Bob organizes two competitions on the same day, plus an upcoming one, and Cara one.
+    `INSERT INTO competitions VALUES
+       ('Torun2025','Torun Open 2025','Poland','Torun','Arena','2025-09-10','2025-09-10',NULL),
+       ('Bydgoszcz2025','Bydgoszcz Open 2025','Poland','Bydgoszcz','Arena','2025-09-10','2025-09-10',NULL)`,
+    `INSERT INTO competition_organizers VALUES
+       ('Torun2025',2),('Bydgoszcz2025',2),('Lublin2099',2),('Warsaw2025',1)`,
     "INSERT INTO ranks_single VALUES ('2025AAAA01','333',500,10,5,1),('2025AAAA01','333bf',3000,20,9,2)",
     "INSERT INTO ranks_average VALUES ('2025AAAA01','333',700,12,6,2)",
   ])
@@ -220,6 +227,11 @@ integration(
     assert.deepEqual(
       competitions.map((competition) => competition.id),
       ["Beijing2026", "Krakow2026", "Warsaw2026", "Warsaw2025"],
+    );
+    assert.deepEqual(
+      competitions.map((competition) => competition.number),
+      [4, 3, 2, 1],
+      "each is numbered from the first competition",
     );
     const [, , warsaw2026, warsaw2025] = competitions;
     assert.equal(warsaw2025.venue, "Cube Hall", "the markdown link is not the name");
@@ -381,6 +393,26 @@ integration(
   },
 );
 
+integration(
+  "organized competitions are numbered oldest first, by ID within a day",
+  async () => {
+    const bob = await getPersonProfile(pool, "2025BBBB01");
+    assert.deepEqual(
+      bob.organized.map(({ id, number }) => ({ id, number })),
+      [
+        { id: "Torun2025", number: 2 },
+        { id: "Bydgoszcz2025", number: 1 },
+      ],
+      "the upcoming competition is not counted",
+    );
+    assert.deepEqual(
+      (await getPersonProfile(pool, "2025CCCC01")).organized.map(({ id }) => id),
+      ["Warsaw2025"],
+    );
+    assert.deepEqual((await getPersonProfile(pool, "2025AAAA01")).organized, []);
+  },
+);
+
 integration("a competitor without results has an empty profile", async () => {
   await pool.query(
     "INSERT INTO persons VALUES ('2026EEEE01',1,'Eve','Poland')",
@@ -389,6 +421,7 @@ integration("a competitor without results has an empty profile", async () => {
   assert.deepEqual(profile.competitions, []);
   assert.deepEqual(profile.competitors, []);
   assert.deepEqual(profile.delegated, []);
+  assert.deepEqual(profile.organized, []);
   assert.equal(profile.totals.competitions, 0);
   assert.equal(profile.totals.solves, 0);
   assert.equal(profile.totals.first_competition_date, null);

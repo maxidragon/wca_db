@@ -163,7 +163,7 @@ export interface CompetitionTogether {
   start_date: string | null;
 }
 
-const STAFF_ASSIGNMENTS = {
+export const STAFF_ASSIGNMENTS = {
   delegated: { table: "competition_delegates", userColumn: "delegate_id" },
   organized: { table: "competition_organizers", userColumn: "organizer_id" },
 } as const;

@@ -1,6 +1,6 @@
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { formatDate, formatResult } from "../../utils/results";
-import type { PersonalBestResult, PersonProfile } from "./types";
+import type { PersonalBestResult, PersonProfile, StaffedCompetition } from "./types";
 
 const WCA_ORIGIN = "https://www.worldcubeassociation.org";
 
@@ -92,8 +92,171 @@ function rankCells(ranks: PersonalBestResult | null) {
   ));
 }
 
+const TABS = ["competitions", "delegated", "organized"] as const;
+type Tab = (typeof TABS)[number];
+
+const TAB_LABELS: Record<Tab, string> = {
+  competitions: "Competitions",
+  delegated: "Delegated",
+  organized: "Organized",
+};
+
+function CompetitionLink({ id, name }: { id: string; name: string }) {
+  return (
+    <a
+      href={`${WCA_ORIGIN}/competitions/${id}`}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="text-blue-600 hover:underline"
+    >
+      {name}
+    </a>
+  );
+}
+
+function CompetitionsTable({ profile }: { profile: PersonProfile }) {
+  if (profile.competitions.length === 0)
+    return (
+      <p className="px-4 py-3 text-sm text-gray-500">
+        This competitor has no results yet.
+      </p>
+    );
+  return (
+    <>
+      <p className="px-4 py-3 text-sm text-gray-500">
+        Events and rounds show competed in / total at the competition. PRs count each
+        event's single and average beaten at most once per competition.
+      </p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500">
+            <tr>
+              {[
+                ["#", true],
+                ["Date", false],
+                ["Competition", false],
+                ["Venue", false],
+                ["City", false],
+                ["Competitors", true],
+                ["Events", true],
+                ["Rounds", true],
+                ["Solves", true],
+                ["PRs", true],
+              ].map(([label, right]) => (
+                <th
+                  key={String(label)}
+                  scope="col"
+                  className={`px-4 py-2${right ? " text-right" : ""}`}
+                >
+                  {label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {profile.competitions.map((competition) => (
+              <tr key={competition.id} className="hover:bg-gray-50">
+                <td className="px-4 py-2 text-right whitespace-nowrap text-gray-500">
+                  {competition.number}
+                </td>
+                <td className="px-4 py-2 whitespace-nowrap text-gray-500">
+                  {formatDate(competition.start_date)}
+                </td>
+                <td className="px-4 py-2">
+                  <CompetitionLink id={competition.id} name={competition.name} />
+                </td>
+                <td className="px-4 py-2 text-gray-600">{competition.venue}</td>
+                <td className="px-4 py-2 whitespace-nowrap text-gray-600">
+                  {competition.city_name}, {competition.country_name}
+                </td>
+                <td className="px-4 py-2 text-right whitespace-nowrap text-gray-600">
+                  {competition.competitors}
+                </td>
+                <td className="px-4 py-2 text-right whitespace-nowrap text-gray-600">
+                  {competition.events} / {competition.total_events}
+                </td>
+                <td className="px-4 py-2 text-right whitespace-nowrap text-gray-600">
+                  {competition.rounds} / {competition.total_rounds}
+                </td>
+                <td className="px-4 py-2 text-right whitespace-nowrap text-gray-600">
+                  {competition.solves} / {competition.attempts}
+                </td>
+                <td className="px-4 py-2 text-right whitespace-nowrap text-gray-600">
+                  {competition.personal_records}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
+function StaffedTable({
+  competitions,
+  emptyMessage,
+}: {
+  competitions: StaffedCompetition[];
+  emptyMessage: string;
+}) {
+  if (competitions.length === 0)
+    return <p className="px-4 py-3 text-sm text-gray-500">{emptyMessage}</p>;
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500">
+          <tr>
+            <th scope="col" className="px-4 py-2 text-right">
+              #
+            </th>
+            <th scope="col" className="px-4 py-2">
+              Date
+            </th>
+            <th scope="col" className="px-4 py-2">
+              Competition
+            </th>
+            <th scope="col" className="px-4 py-2">
+              City
+            </th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-100">
+          {competitions.map((competition) => (
+            <tr key={competition.id} className="hover:bg-gray-50">
+              <td className="px-4 py-2 text-right whitespace-nowrap text-gray-500">
+                {competition.number}
+              </td>
+              <td className="px-4 py-2 whitespace-nowrap text-gray-500">
+                {formatDate(competition.start_date)}
+              </td>
+              <td className="px-4 py-2">
+                <CompetitionLink id={competition.id} name={competition.name} />
+              </td>
+              <td className="px-4 py-2 whitespace-nowrap text-gray-600">
+                {competition.city_name}, {competition.country_name}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export default function PersonProfileView({ profile }: { profile: PersonProfile }) {
   const { person, totals } = profile;
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab: Tab =
+    TABS.find((option) => option === searchParams.get("tab")) ?? "competitions";
+
+  // The tab lives in the URL so a shared link opens on the list it names.
+  const selectTab = (next: Tab) => {
+    const params = new URLSearchParams(searchParams);
+    if (next === "competitions") params.delete("tab");
+    else params.set("tab", next);
+    setSearchParams(params, { replace: true });
+  };
   const mostCompetitionsInAYear = Math.max(
     1,
     ...profile.years.map((year) => year.competitions),
@@ -293,135 +456,47 @@ export default function PersonProfileView({ profile }: { profile: PersonProfile 
         </ul>
       </Card>
 
-      <Card title={`All competitions (${profile.competitions.length})`}>
-        <p className="px-4 py-3 text-sm text-gray-500">
-          Events and rounds show competed in / total at the competition. PRs count each
-          event's single and average beaten at most once per competition.
-        </p>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500">
-              <tr>
-                <th scope="col" className="px-4 py-2">
-                  Date
-                </th>
-                <th scope="col" className="px-4 py-2">
-                  Competition
-                </th>
-                <th scope="col" className="px-4 py-2">
-                  Venue
-                </th>
-                <th scope="col" className="px-4 py-2">
-                  City
-                </th>
-                <th scope="col" className="px-4 py-2 text-right">
-                  Competitors
-                </th>
-                <th scope="col" className="px-4 py-2 text-right">
-                  Events
-                </th>
-                <th scope="col" className="px-4 py-2 text-right">
-                  Rounds
-                </th>
-                <th scope="col" className="px-4 py-2 text-right">
-                  Solves
-                </th>
-                <th scope="col" className="px-4 py-2 text-right">
-                  PRs
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {profile.competitions.map((competition) => (
-                <tr key={competition.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-2 whitespace-nowrap text-gray-500">
-                    {formatDate(competition.start_date)}
-                  </td>
-                  <td className="px-4 py-2">
-                    <a
-                      href={`${WCA_ORIGIN}/competitions/${competition.id}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-600 hover:underline"
-                    >
-                      {competition.name}
-                    </a>
-                  </td>
-                  <td className="px-4 py-2 text-gray-600">{competition.venue}</td>
-                  <td className="px-4 py-2 whitespace-nowrap text-gray-600">
-                    {competition.city_name}, {competition.country_name}
-                  </td>
-                  <td className="px-4 py-2 text-right whitespace-nowrap text-gray-600">
-                    {competition.competitors}
-                  </td>
-                  <td className="px-4 py-2 text-right whitespace-nowrap text-gray-600">
-                    {competition.events} / {competition.total_events}
-                  </td>
-                  <td className="px-4 py-2 text-right whitespace-nowrap text-gray-600">
-                    {competition.rounds} / {competition.total_rounds}
-                  </td>
-                  <td className="px-4 py-2 text-right whitespace-nowrap text-gray-600">
-                    {competition.solves} / {competition.attempts}
-                  </td>
-                  <td className="px-4 py-2 text-right whitespace-nowrap text-gray-600">
-                    {competition.personal_records}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      <section className="rounded-lg border border-gray-200 bg-white">
+        <div
+          role="tablist"
+          className="flex flex-wrap gap-1 border-b border-gray-100 px-2 py-2 text-sm"
+        >
+          {TABS.map((option) => (
+            <button
+              key={option}
+              type="button"
+              role="tab"
+              aria-selected={option === tab}
+              onClick={() => selectTab(option)}
+              className={`cursor-pointer rounded px-3 py-1.5 font-medium transition-colors ${
+                option === tab
+                  ? "bg-blue-100 text-blue-700"
+                  : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+              }`}
+            >
+              {TAB_LABELS[option]}
+              <span className="ml-1.5 text-xs text-gray-500">
+                {profile[option].length.toLocaleString()}
+              </span>
+            </button>
+          ))}
         </div>
-      </Card>
-
-      {profile.delegated.length > 0 && (
-        <Card title={`Delegated competitions (${profile.delegated.length})`}>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500">
-                <tr>
-                  <th scope="col" className="px-4 py-2 text-right">
-                    #
-                  </th>
-                  <th scope="col" className="px-4 py-2">
-                    Date
-                  </th>
-                  <th scope="col" className="px-4 py-2">
-                    Competition
-                  </th>
-                  <th scope="col" className="px-4 py-2">
-                    City
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {profile.delegated.map((competition) => (
-                  <tr key={competition.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-2 text-right whitespace-nowrap text-gray-500">
-                      {competition.number}
-                    </td>
-                    <td className="px-4 py-2 whitespace-nowrap text-gray-500">
-                      {formatDate(competition.start_date)}
-                    </td>
-                    <td className="px-4 py-2">
-                      <a
-                        href={`${WCA_ORIGIN}/competitions/${competition.id}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-600 hover:underline"
-                      >
-                        {competition.name}
-                      </a>
-                    </td>
-                    <td className="px-4 py-2 whitespace-nowrap text-gray-600">
-                      {competition.city_name}, {competition.country_name}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-      )}
+        <div role="tabpanel">
+          {tab === "competitions" && <CompetitionsTable profile={profile} />}
+          {tab === "delegated" && (
+            <StaffedTable
+              competitions={profile.delegated}
+              emptyMessage="This person has not delegated a competition."
+            />
+          )}
+          {tab === "organized" && (
+            <StaffedTable
+              competitions={profile.organized}
+              emptyMessage="This person has not organized a competition."
+            />
+          )}
+        </div>
+      </section>
     </div>
   );
 }

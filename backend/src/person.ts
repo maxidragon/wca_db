@@ -1,4 +1,5 @@
 import { Pool, RowDataPacket } from "mysql2/promise";
+import { STAFF_ASSIGNMENTS } from "./relations";
 
 /** How many entries the "most" lists carry: people competed with, venues and cities. */
 const TOP_LIST_SIZE = 10;
@@ -33,16 +34,18 @@ export interface PersonCompetition {
   solves: number;
   attempts: number;
   personal_records: number;
+  /** Which of the person's competitions this was, counting from the first. */
+  number: number;
 }
 
-export interface DelegatedCompetition {
+export interface StaffedCompetition {
   id: string;
   name: string;
   start_date: string;
   city_name: string;
   country_id: string;
   country_name: string;
-  /** Which of the person's delegated competitions this was, counting from the first. */
+  /** Which of the person's delegated or organized competitions this was, from the first. */
   number: number;
 }
 
@@ -72,7 +75,8 @@ export interface PersonProfile {
   };
   personal_bests: PersonalBest[];
   competitions: PersonCompetition[];
-  delegated: DelegatedCompetition[];
+  delegated: StaffedCompetition[];
+  organized: StaffedCompetition[];
   competitors: { wca_id: string; name: string; competitions: number }[];
   venues: {
     venue: string;
@@ -304,7 +308,7 @@ async function getCompetitions(pool: Pool, wcaId: string): Promise<PersonCompeti
      JOIN countries co ON co.id = c.country_id
      JOIN results r ON r.competition_id = c.id
      GROUP BY c.id
-     ORDER BY c.start_date DESC, c.id`,
+     ORDER BY c.start_date DESC, c.id DESC`,
       [wcaId, wcaId],
     ),
     pool.query<PersonResultRow[]>(
@@ -317,7 +321,8 @@ async function getCompetitions(pool: Pool, wcaId: string): Promise<PersonCompeti
     rows.map((row) => row.id).reverse(),
     results,
   );
-  return rows.map((row) => ({
+  // Numbered oldest first, and by ID within a day, as the Achievements milestones count them.
+  return rows.map((row, index) => ({
     id: row.id,
     name: row.name,
     start_date: row.start_date,
@@ -333,32 +338,34 @@ async function getCompetitions(pool: Pool, wcaId: string): Promise<PersonCompeti
     solves: Number(row.solves),
     attempts: Number(row.attempts),
     personal_records: personalRecords.get(row.id) ?? 0,
+    number: rows.length - index,
   }));
 }
 
 /**
- * Every competition this person was a Delegate of, newest first. Assignments come from the
- * WCA account linked to the WCA ID, not from results, so they exist long before the
+ * Every competition this person delegated or organized, newest first. Assignments come from
+ * the WCA account linked to the WCA ID, not from results, so they exist long before the
  * competition is held: cancelled ones and those yet to start do not count.
  */
-async function getDelegatedCompetitions(
+async function getStaffedCompetitions(
   pool: Pool,
+  role: keyof typeof STAFF_ASSIGNMENTS,
   wcaId: string,
-): Promise<DelegatedCompetition[]> {
+): Promise<StaffedCompetition[]> {
+  const { table, userColumn } = STAFF_ASSIGNMENTS[role];
   const [rows] = await pool.query<RowDataPacket[]>(
     `SELECT DISTINCT c.id, c.name, DATE_FORMAT(c.start_date, '%Y-%m-%d') AS start_date,
             c.city_name, c.country_id, co.name AS country_name
      FROM users u
-     JOIN competition_delegates d ON d.delegate_id = u.id
-     JOIN competitions c ON c.id = d.competition_id
+     JOIN ${table} a ON a.${userColumn} = u.id
+     JOIN competitions c ON c.id = a.competition_id
      JOIN countries co ON co.id = c.country_id
      WHERE u.wca_id = ? AND c.cancelled_at IS NULL AND c.start_date <= CURDATE()
      ORDER BY start_date DESC, c.id DESC`,
     [wcaId],
   );
-  // Counted oldest first, and by ID within a day, as the Achievements milestones count them.
   return rows.map((row, index) => ({
-    ...(row as Omit<DelegatedCompetition, "number">),
+    ...(row as Omit<StaffedCompetition, "number">),
     number: rows.length - index,
   }));
 }
@@ -413,13 +420,15 @@ export async function getPersonProfile(
     personalBests,
     competitions,
     delegated,
+    organized,
     competitors,
     [[entryTotals]],
     [[resultTotals]],
   ] = await Promise.all([
     getPersonalBests(pool, wcaId),
     getCompetitions(pool, wcaId),
-    getDelegatedCompetitions(pool, wcaId),
+    getStaffedCompetitions(pool, "delegated", wcaId),
+    getStaffedCompetitions(pool, "organized", wcaId),
     getCompetitors(pool, wcaId),
     pool.query<EntryTotalsRow[]>(
       `SELECT COUNT(DISTINCT event_id) AS events,
@@ -483,6 +492,7 @@ export async function getPersonProfile(
     personal_bests: personalBests,
     competitions,
     delegated,
+    organized,
     competitors,
     venues: groupCompetitions(
       competitions,
