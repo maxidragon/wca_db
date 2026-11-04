@@ -372,6 +372,50 @@ export default function PersonProfileView({ profile }: { profile: PersonProfile 
           </table>
         </div>
       </Card>
+
+      {profile.delegated.length > 0 && (
+        <Card title={`Delegated competitions (${profile.delegated.length})`}>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500">
+                <tr>
+                  <th scope="col" className="px-4 py-2">
+                    Date
+                  </th>
+                  <th scope="col" className="px-4 py-2">
+                    Competition
+                  </th>
+                  <th scope="col" className="px-4 py-2">
+                    City
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {profile.delegated.map((competition) => (
+                  <tr key={competition.id} className="hover:bg-gray-50">
+                    <td className="px-4 py-2 whitespace-nowrap text-gray-500">
+                      {formatDate(competition.start_date)}
+                    </td>
+                    <td className="px-4 py-2">
+                      <a
+                        href={`${WCA_ORIGIN}/competitions/${competition.id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 hover:underline"
+                      >
+                        {competition.name}
+                      </a>
+                    </td>
+                    <td className="px-4 py-2 whitespace-nowrap text-gray-600">
+                      {competition.city_name}, {competition.country_name}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
     </div>
   );
 }

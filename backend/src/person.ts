@@ -35,6 +35,15 @@ export interface PersonCompetition {
   personal_records: number;
 }
 
+export interface DelegatedCompetition {
+  id: string;
+  name: string;
+  start_date: string;
+  city_name: string;
+  country_id: string;
+  country_name: string;
+}
+
 export interface PersonProfile {
   person: {
     wca_id: string;
@@ -61,6 +70,7 @@ export interface PersonProfile {
   };
   personal_bests: PersonalBest[];
   competitions: PersonCompetition[];
+  delegated: DelegatedCompetition[];
   competitors: { wca_id: string; name: string; competitions: number }[];
   venues: {
     venue: string;
@@ -325,6 +335,29 @@ async function getCompetitions(pool: Pool, wcaId: string): Promise<PersonCompeti
 }
 
 /**
+ * Every competition this person was a Delegate of, newest first. Assignments come from the
+ * WCA account linked to the WCA ID, not from results, so they exist long before the
+ * competition is held: cancelled ones and those yet to start do not count.
+ */
+async function getDelegatedCompetitions(
+  pool: Pool,
+  wcaId: string,
+): Promise<DelegatedCompetition[]> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT DISTINCT c.id, c.name, DATE_FORMAT(c.start_date, '%Y-%m-%d') AS start_date,
+            c.city_name, c.country_id, co.name AS country_name
+     FROM users u
+     JOIN competition_delegates d ON d.delegate_id = u.id
+     JOIN competitions c ON c.id = d.competition_id
+     JOIN countries co ON co.id = c.country_id
+     WHERE u.wca_id = ? AND c.cancelled_at IS NULL AND c.start_date <= CURDATE()
+     ORDER BY start_date DESC, c.id`,
+    [wcaId],
+  );
+  return rows as DelegatedCompetition[];
+}
+
+/**
  * Everyone who attended one of this competitor's competitions, by how many they shared. The
  * entry table is read competition-first here, which its primary key orders, so each shared
  * competition costs the rows of that competition alone.
@@ -370,34 +403,41 @@ export async function getPersonProfile(
   );
   if (!person) return null;
 
-  const [personalBests, competitions, competitors, [[entryTotals]], [[resultTotals]]] =
-    await Promise.all([
-      getPersonalBests(pool, wcaId),
-      getCompetitions(pool, wcaId),
-      getCompetitors(pool, wcaId),
-      pool.query<EntryTotalsRow[]>(
-        `SELECT COUNT(DISTINCT event_id) AS events,
-                SUM(solves) AS solves, SUM(attempts) AS attempts
-         FROM statistics_entries WHERE person_id = ?`,
-        [wcaId],
-      ),
-      // A record marker is 'WR', 'NR' or one of the six continental ones, and a result can
-      // carry one for its single and one for its average, so the two columns are summed.
-      pool.query<ResultTotalsRow[]>(
-        `SELECT SUM(r.round_type_id IN ('c','f') AND r.best > 0 AND r.pos = 1) AS gold,
-                SUM(r.round_type_id IN ('c','f') AND r.best > 0 AND r.pos = 2) AS silver,
-                SUM(r.round_type_id IN ('c','f') AND r.best > 0 AND r.pos = 3) AS bronze,
-                SUM(COALESCE(r.regional_single_record,'') = 'WR')
-                  + SUM(COALESCE(r.regional_average_record,'') = 'WR') AS world_records,
-                SUM(COALESCE(r.regional_single_record,'') NOT IN ('','WR','NR'))
-                  + SUM(COALESCE(r.regional_average_record,'') NOT IN ('','WR','NR'))
-                  AS continental_records,
-                SUM(COALESCE(r.regional_single_record,'') = 'NR')
-                  + SUM(COALESCE(r.regional_average_record,'') = 'NR') AS national_records
-         FROM results r WHERE r.person_id = ?`,
-        [wcaId],
-      ),
-    ]);
+  const [
+    personalBests,
+    competitions,
+    delegated,
+    competitors,
+    [[entryTotals]],
+    [[resultTotals]],
+  ] = await Promise.all([
+    getPersonalBests(pool, wcaId),
+    getCompetitions(pool, wcaId),
+    getDelegatedCompetitions(pool, wcaId),
+    getCompetitors(pool, wcaId),
+    pool.query<EntryTotalsRow[]>(
+      `SELECT COUNT(DISTINCT event_id) AS events,
+              SUM(solves) AS solves, SUM(attempts) AS attempts
+       FROM statistics_entries WHERE person_id = ?`,
+      [wcaId],
+    ),
+    // A record marker is 'WR', 'NR' or one of the six continental ones, and a result can
+    // carry one for its single and one for its average, so the two columns are summed.
+    pool.query<ResultTotalsRow[]>(
+      `SELECT SUM(r.round_type_id IN ('c','f') AND r.best > 0 AND r.pos = 1) AS gold,
+              SUM(r.round_type_id IN ('c','f') AND r.best > 0 AND r.pos = 2) AS silver,
+              SUM(r.round_type_id IN ('c','f') AND r.best > 0 AND r.pos = 3) AS bronze,
+              SUM(COALESCE(r.regional_single_record,'') = 'WR')
+                + SUM(COALESCE(r.regional_average_record,'') = 'WR') AS world_records,
+              SUM(COALESCE(r.regional_single_record,'') NOT IN ('','WR','NR'))
+                + SUM(COALESCE(r.regional_average_record,'') NOT IN ('','WR','NR'))
+                AS continental_records,
+              SUM(COALESCE(r.regional_single_record,'') = 'NR')
+                + SUM(COALESCE(r.regional_average_record,'') = 'NR') AS national_records
+       FROM results r WHERE r.person_id = ?`,
+      [wcaId],
+    ),
+  ]);
 
   const countries = groupCompetitions(
     competitions,
@@ -436,6 +476,7 @@ export async function getPersonProfile(
     },
     personal_bests: personalBests,
     competitions,
+    delegated,
     competitors,
     venues: groupCompetitions(
       competitions,
