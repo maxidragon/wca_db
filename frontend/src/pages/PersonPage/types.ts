@@ -30,6 +30,16 @@ export interface PersonCompetition {
   personal_records: number;
 }
 
+export interface DelegatedCompetition {
+  id: string;
+  name: string;
+  start_date: string;
+  city_name: string;
+  country_id: string;
+  country_name: string;
+  number: number;
+}
+
 export interface PersonProfile {
   person: {
     wca_id: string;
@@ -56,6 +66,7 @@ export interface PersonProfile {
   };
   personal_bests: PersonalBest[];
   competitions: PersonCompetition[];
+  delegated: DelegatedCompetition[];
   competitors: { wca_id: string; name: string; competitions: number }[];
   venues: {
     venue: string;

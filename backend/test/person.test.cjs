@@ -43,7 +43,9 @@ before(async () => {
     "CREATE TABLE countries (id VARCHAR(30) PRIMARY KEY,name VARCHAR(40),continent_id VARCHAR(30))",
     "CREATE TABLE events (id VARCHAR(10) PRIMARY KEY,name VARCHAR(50),`rank` INT)",
     "CREATE TABLE persons (wca_id VARCHAR(10),sub_id INT,name VARCHAR(40),country_id VARCHAR(30),PRIMARY KEY(wca_id,sub_id))",
-    "CREATE TABLE competitions (id VARCHAR(40) PRIMARY KEY,name VARCHAR(50),country_id VARCHAR(30),city_name VARCHAR(50),venue VARCHAR(240),start_date DATE,end_date DATE)",
+    "CREATE TABLE competitions (id VARCHAR(40) PRIMARY KEY,name VARCHAR(50),country_id VARCHAR(30),city_name VARCHAR(50),venue VARCHAR(240),start_date DATE,end_date DATE,cancelled_at DATETIME)",
+    "CREATE TABLE users (id INT PRIMARY KEY,wca_id VARCHAR(10))",
+    "CREATE TABLE competition_delegates (competition_id VARCHAR(40),delegate_id INT)",
     "CREATE TABLE results (id INT PRIMARY KEY,person_id VARCHAR(10),country_id VARCHAR(30),competition_id VARCHAR(40),event_id VARCHAR(10),round_type_id VARCHAR(2),pos INT,best INT,average INT,regional_single_record VARCHAR(5),regional_average_record VARCHAR(5))",
     "CREATE TABLE result_attempts (result_id INT,attempt_number INT,value INT,PRIMARY KEY(result_id,attempt_number))",
     "CREATE TABLE ranks_single (person_id VARCHAR(10),event_id VARCHAR(10),best INT,world_rank INT,continent_rank INT,country_rank INT,PRIMARY KEY(person_id,event_id))",
@@ -55,14 +57,24 @@ before(async () => {
     // profile must report the current ones.
     "INSERT INTO persons VALUES ('2025AAAA01',1,'Alice','Poland'),('2025AAAA01',2,'Old Alice','China'),('2025BBBB01',1,'Bob','Poland'),('2025CCCC01',1,'Cara','Poland'),('2025DDDD01',1,'Dan','China'),('2025EEEE01',1,'Eve','Poland')",
     `INSERT INTO competitions VALUES
-       ('Warsaw2025','Warsaw Open 2025','Poland','Warsaw','[Cube Hall](https://example.test/hall)','2025-01-10','2025-01-10'),
-       ('Warsaw2026','Warsaw Open 2026','Poland','Warsaw','[Cube Hall](https://example.test/hall)','2026-02-10','2026-02-10'),
-       ('Krakow2026','Krakow Open 2026','Poland','Krakow','Sports Hall','2026-03-10','2026-03-10'),
-       ('Beijing2026','Beijing Open 2026','China','Beijing','Beijing Gym','2026-04-10','2026-04-10'),
-       ('Gdansk2025','Gdansk Open 2025','Poland','Gdansk','Port Hall','2025-05-10','2025-05-10'),
-       ('Gdansk2026','Gdansk Open 2026','Poland','Gdansk','Port Hall','2026-05-10','2026-05-10'),
-       ('Poznan2026','Poznan Open 2026','Poland','Poznan','Fair Hall','2026-06-10','2026-06-10'),
-       ('Lodz2026','Lodz Open 2026','Poland','Lodz','City Hall','2026-07-10','2026-07-10')`,
+       ('Warsaw2025','Warsaw Open 2025','Poland','Warsaw','[Cube Hall](https://example.test/hall)','2025-01-10','2025-01-10',NULL),
+       ('Warsaw2026','Warsaw Open 2026','Poland','Warsaw','[Cube Hall](https://example.test/hall)','2026-02-10','2026-02-10',NULL),
+       ('Krakow2026','Krakow Open 2026','Poland','Krakow','Sports Hall','2026-03-10','2026-03-10',NULL),
+       ('Beijing2026','Beijing Open 2026','China','Beijing','Beijing Gym','2026-04-10','2026-04-10',NULL),
+       ('Gdansk2025','Gdansk Open 2025','Poland','Gdansk','Port Hall','2025-05-10','2025-05-10',NULL),
+       ('Gdansk2026','Gdansk Open 2026','Poland','Gdansk','Port Hall','2026-05-10','2026-05-10',NULL),
+       ('Poznan2026','Poznan Open 2026','Poland','Poznan','Fair Hall','2026-06-10','2026-06-10',NULL),
+       ('Lodz2026','Lodz Open 2026','Poland','Lodz','City Hall','2026-07-10','2026-07-10',NULL)`,
+    // Upcoming and cancelled competitions Cara is assigned to: neither has been delegated.
+    `INSERT INTO competitions VALUES
+       ('Lublin2099','Lublin Open 2099','Poland','Lublin','Arena','2099-01-10','2099-01-10',NULL),
+       ('Opole2025','Opole Open 2025','Poland','Opole','Arena','2025-03-10','2025-03-10','2025-02-01 00:00:00')`,
+    // Cara delegates three held competitions but competed only at Warsaw2025; Bob has an
+    // account and no assignments; an account without a WCA ID co-delegates Krakow2026.
+    "INSERT INTO users VALUES (1,'2025CCCC01'),(2,'2025BBBB01'),(3,NULL)",
+    `INSERT INTO competition_delegates VALUES
+       ('Warsaw2025',1),('Beijing2026',1),('Krakow2026',1),('Krakow2026',3),
+       ('Lublin2099',1),('Opole2025',1)`,
     "INSERT INTO ranks_single VALUES ('2025AAAA01','333',500,10,5,1),('2025AAAA01','333bf',3000,20,9,2)",
     "INSERT INTO ranks_average VALUES ('2025AAAA01','333',700,12,6,2)",
   ])
@@ -326,6 +338,49 @@ integration("venues, cities, countries and years are ranked by attendance", asyn
   ]);
 });
 
+integration(
+  "delegated competitions come from assignments, newest first, held ones only",
+  async () => {
+    const cara = await getPersonProfile(pool, "2025CCCC01");
+    assert.deepEqual(cara.delegated, [
+      {
+        id: "Beijing2026",
+        name: "Beijing Open 2026",
+        start_date: "2026-04-10",
+        city_name: "Beijing",
+        country_id: "China",
+        country_name: "China",
+        number: 3,
+      },
+      {
+        id: "Krakow2026",
+        name: "Krakow Open 2026",
+        start_date: "2026-03-10",
+        city_name: "Krakow",
+        country_id: "Poland",
+        country_name: "Poland",
+        number: 2,
+      },
+      {
+        id: "Warsaw2025",
+        name: "Warsaw Open 2025",
+        start_date: "2025-01-10",
+        city_name: "Warsaw",
+        country_id: "Poland",
+        country_name: "Poland",
+        number: 1,
+      },
+    ]);
+    assert.deepEqual(
+      cara.competitions.map((competition) => competition.id),
+      ["Warsaw2025"],
+      "delegating is not competing",
+    );
+    assert.deepEqual((await getPersonProfile(pool, "2025BBBB01")).delegated, []);
+    assert.deepEqual((await getPersonProfile(pool, "2025AAAA01")).delegated, []);
+  },
+);
+
 integration("a competitor without results has an empty profile", async () => {
   await pool.query(
     "INSERT INTO persons VALUES ('2026EEEE01',1,'Eve','Poland')",
@@ -333,6 +388,7 @@ integration("a competitor without results has an empty profile", async () => {
   const profile = await getPersonProfile(pool, "2026EEEE01");
   assert.deepEqual(profile.competitions, []);
   assert.deepEqual(profile.competitors, []);
+  assert.deepEqual(profile.delegated, []);
   assert.equal(profile.totals.competitions, 0);
   assert.equal(profile.totals.solves, 0);
   assert.equal(profile.totals.first_competition_date, null);
