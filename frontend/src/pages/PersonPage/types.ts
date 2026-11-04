@@ -37,6 +37,7 @@ export interface DelegatedCompetition {
   city_name: string;
   country_id: string;
   country_name: string;
+  number: number;
 }
 
 export interface PersonProfile {

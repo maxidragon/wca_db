@@ -350,6 +350,7 @@ integration(
         city_name: "Beijing",
         country_id: "China",
         country_name: "China",
+        number: 3,
       },
       {
         id: "Krakow2026",
@@ -358,6 +359,7 @@ integration(
         city_name: "Krakow",
         country_id: "Poland",
         country_name: "Poland",
+        number: 2,
       },
       {
         id: "Warsaw2025",
@@ -366,6 +368,7 @@ integration(
         city_name: "Warsaw",
         country_id: "Poland",
         country_name: "Poland",
+        number: 1,
       },
     ]);
     assert.deepEqual(

@@ -42,6 +42,8 @@ export interface DelegatedCompetition {
   city_name: string;
   country_id: string;
   country_name: string;
+  /** Which of the person's delegated competitions this was, counting from the first. */
+  number: number;
 }
 
 export interface PersonProfile {
@@ -351,10 +353,14 @@ async function getDelegatedCompetitions(
      JOIN competitions c ON c.id = d.competition_id
      JOIN countries co ON co.id = c.country_id
      WHERE u.wca_id = ? AND c.cancelled_at IS NULL AND c.start_date <= CURDATE()
-     ORDER BY start_date DESC, c.id`,
+     ORDER BY start_date DESC, c.id DESC`,
     [wcaId],
   );
-  return rows as DelegatedCompetition[];
+  // Counted oldest first, and by ID within a day, as the Achievements milestones count them.
+  return rows.map((row, index) => ({
+    ...(row as Omit<DelegatedCompetition, "number">),
+    number: rows.length - index,
+  }));
 }
 
 /**

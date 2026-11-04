@@ -379,6 +379,9 @@ export default function PersonProfileView({ profile }: { profile: PersonProfile 
             <table className="w-full text-sm">
               <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500">
                 <tr>
+                  <th scope="col" className="px-4 py-2 text-right">
+                    #
+                  </th>
                   <th scope="col" className="px-4 py-2">
                     Date
                   </th>
@@ -393,6 +396,9 @@ export default function PersonProfileView({ profile }: { profile: PersonProfile 
               <tbody className="divide-y divide-gray-100">
                 {profile.delegated.map((competition) => (
                   <tr key={competition.id} className="hover:bg-gray-50">
+                    <td className="px-4 py-2 text-right whitespace-nowrap text-gray-500">
+                      {competition.number}
+                    </td>
                     <td className="px-4 py-2 whitespace-nowrap text-gray-500">
                       {formatDate(competition.start_date)}
                     </td>
