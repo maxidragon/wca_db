@@ -24,6 +24,13 @@ jobs:
     - name: Create .env
       run: echo "${{ secrets.ENV_PRODUCTION }}" > .env
       working-directory: ./backend
+    # Kept as a secret of its own so it can be rotated without editing ENV_PRODUCTION. Without
+    # the secret the line is empty, which leaves the service token disabled.
+    - name: Add the service token to .env
+      run: printf 'SERVICE_TOKEN=%s\n' "$SERVICE_TOKEN" >> .env
+      working-directory: ./backend
+      env:
+        SERVICE_TOKEN: ${{ secrets.SERVICE_TOKEN }}
     - name: Build project
       run: npm run build
       working-directory: ./backend
