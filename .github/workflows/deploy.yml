@@ -21,33 +21,10 @@ jobs:
     - name: Install backend dependencies
       run: npm install
       working-directory: ./backend 
-    # Each setting is a repository secret of its own. Values are single-quoted so dotenv and
-    # the shell steps below (`. ./.env`) read them literally. JWT_SECRET falls back to a
-    # default written in the source, which would let anyone sign a login token, so the deploy
-    # stops without it. Every other setting may be left unset, which keeps the code's default;
-    # an unset SERVICE_TOKEN leaves the service token disabled.
+    # Both workflows that restart the backend write the same .env; keep this env list in step with
+    # update_database.yml and with SETTINGS in .github/scripts/write_backend_env.sh.
     - name: Create .env
-      run: |
-        if [ -z "$JWT_SECRET" ]; then
-          echo "::error::The JWT_SECRET repository secret is not set"
-          exit 1
-        fi
-        : > .env
-        for name in PORT FRONTEND_ORIGIN SESSION_SECRET JWT_SECRET SERVICE_TOKEN \
-            DB_HOST DB_USER DB_PASS DB_NAME QUERY_DB_USER QUERY_DB_PASS \
-            WCA_CLIENT_ID WCA_CLIENT_SECRET STATISTICS_MEMORY_MB; do
-          value="${!name}"
-          [ -n "$value" ] || continue
-          case "$value" in
-            *"'"*|*$'\n'*)
-              echo "::error::The $name secret contains a single quote or a newline"
-              exit 1
-              ;;
-          esac
-          printf "%s='%s'\n" "$name" "$value" >> .env
-        done
-      shell: bash
-      working-directory: ./backend
+      run: .github/scripts/write_backend_env.sh
       env:
         PORT: ${{ secrets.PORT }}
         FRONTEND_ORIGIN: ${{ secrets.FRONTEND_ORIGIN }}

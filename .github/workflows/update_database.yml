@@ -22,9 +22,25 @@ jobs:
     - name: Install backend dependencies
       run: npm install
       working-directory: ./backend 
+    # Both workflows that restart the backend write the same .env; keep this env list in step with
+    # deploy.yml and with SETTINGS in .github/scripts/write_backend_env.sh.
     - name: Create .env
-      run: echo "${{ secrets.ENV_PRODUCTION }}" > .env
-      working-directory: ./backend
+      run: .github/scripts/write_backend_env.sh
+      env:
+        PORT: ${{ secrets.PORT }}
+        FRONTEND_ORIGIN: ${{ secrets.FRONTEND_ORIGIN }}
+        SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+        JWT_SECRET: ${{ secrets.JWT_SECRET }}
+        SERVICE_TOKEN: ${{ secrets.SERVICE_TOKEN }}
+        DB_HOST: ${{ secrets.DB_HOST }}
+        DB_USER: ${{ secrets.DB_USER }}
+        DB_PASS: ${{ secrets.DB_PASS }}
+        DB_NAME: ${{ secrets.DB_NAME }}
+        QUERY_DB_USER: ${{ secrets.QUERY_DB_USER }}
+        QUERY_DB_PASS: ${{ secrets.QUERY_DB_PASS }}
+        WCA_CLIENT_ID: ${{ secrets.WCA_CLIENT_ID }}
+        WCA_CLIENT_SECRET: ${{ secrets.WCA_CLIENT_SECRET }}
+        STATISTICS_MEMORY_MB: ${{ secrets.STATISTICS_MEMORY_MB }}
     - name: Build project
       run: npm run build
       working-directory: ./backend
