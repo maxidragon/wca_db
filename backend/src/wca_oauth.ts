@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express"
 import jwt from "jsonwebtoken"
+import { timingSafeEqual } from "node:crypto"
 
 const WCA_ORIGIN = process.env.WCA_ORIGIN || "https://www.worldcubeassociation.org"
 const WCA_CLIENT_ID = process.env.WCA_CLIENT_ID as string
@@ -80,10 +81,31 @@ export async function loginWithWca(req: Request, res: Response, _next: NextFunct
   }
 }
 
+/** Set as `req.user` for a service-token request; it carries no WCA account. */
+export const SERVICE_USER = Object.freeze({ service: true as const })
+
+/**
+ * Whether the bearer token is SERVICE_TOKEN, compared in constant time. Read per request, so
+ * an unset or empty SERVICE_TOKEN disables it and no token can match an empty secret.
+ */
+function isServiceToken(token: string): boolean {
+  const secret = process.env.SERVICE_TOKEN
+  if (!secret) return false
+  const expected = Buffer.from(secret)
+  const given = Buffer.from(token)
+  return given.length === expected.length && timingSafeEqual(given, expected)
+}
+
 export function ensureAuthenticated(req: Request, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization
   if (!authHeader) return res.status(401).json({ error: "Unauthorized" })
-  const token = authHeader.split(" ")[1]
+  const token = authHeader.split(" ")[1] ?? ""
+  if (isServiceToken(token)) {
+    // The service token is read-only and has no WCA user behind it.
+    if (req.method !== "GET") return res.status(403).json({ error: "Forbidden" })
+    ;(req as any).user = SERVICE_USER
+    return next()
+  }
   try {
     const decoded = jwt.verify(token, JWT_SECRET)
     ;(req as any).user = decoded
