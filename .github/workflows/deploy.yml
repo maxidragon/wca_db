@@ -21,16 +21,50 @@ jobs:
     - name: Install backend dependencies
       run: npm install
       working-directory: ./backend 
+    # Each setting is a repository secret of its own. Values are single-quoted so dotenv and
+    # the shell steps below (`. ./.env`) read them literally. JWT_SECRET, SESSION_SECRET and
+    # FRONTEND_ORIGIN fall back to public defaults in the code, so the deploy stops without
+    # them. Every other setting may be left unset, which keeps the code's default; an unset
+    # SERVICE_TOKEN leaves the service token disabled.
     - name: Create .env
-      run: echo "${{ secrets.ENV_PRODUCTION }}" > .env
-      working-directory: ./backend
-    # Kept as a secret of its own so it can be rotated without editing ENV_PRODUCTION. Without
-    # the secret the line is empty, which leaves the service token disabled.
-    - name: Add the service token to .env
-      run: printf 'SERVICE_TOKEN=%s\n' "$SERVICE_TOKEN" >> .env
+      run: |
+        for name in JWT_SECRET SESSION_SECRET FRONTEND_ORIGIN; do
+          if [ -z "${!name}" ]; then
+            echo "::error::The $name repository secret is not set"
+            exit 1
+          fi
+        done
+        : > .env
+        for name in PORT FRONTEND_ORIGIN SESSION_SECRET JWT_SECRET SERVICE_TOKEN \
+            DB_HOST DB_USER DB_PASS DB_NAME QUERY_DB_USER QUERY_DB_PASS \
+            WCA_CLIENT_ID WCA_CLIENT_SECRET STATISTICS_MEMORY_MB; do
+          value="${!name}"
+          [ -n "$value" ] || continue
+          case "$value" in
+            *"'"*|*$'\n'*)
+              echo "::error::The $name secret contains a single quote or a newline"
+              exit 1
+              ;;
+          esac
+          printf "%s='%s'\n" "$name" "$value" >> .env
+        done
+      shell: bash
       working-directory: ./backend
       env:
+        PORT: ${{ secrets.PORT }}
+        FRONTEND_ORIGIN: ${{ secrets.FRONTEND_ORIGIN }}
+        SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+        JWT_SECRET: ${{ secrets.JWT_SECRET }}
         SERVICE_TOKEN: ${{ secrets.SERVICE_TOKEN }}
+        DB_HOST: ${{ secrets.DB_HOST }}
+        DB_USER: ${{ secrets.DB_USER }}
+        DB_PASS: ${{ secrets.DB_PASS }}
+        DB_NAME: ${{ secrets.DB_NAME }}
+        QUERY_DB_USER: ${{ secrets.QUERY_DB_USER }}
+        QUERY_DB_PASS: ${{ secrets.QUERY_DB_PASS }}
+        WCA_CLIENT_ID: ${{ secrets.WCA_CLIENT_ID }}
+        WCA_CLIENT_SECRET: ${{ secrets.WCA_CLIENT_SECRET }}
+        STATISTICS_MEMORY_MB: ${{ secrets.STATISTICS_MEMORY_MB }}
     - name: Build project
       run: npm run build
       working-directory: ./backend
