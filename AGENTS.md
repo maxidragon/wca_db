@@ -69,4 +69,5 @@ The export is around 15 GB against MariaDB's default 128 MB buffer pool, so most
 - Commits follow Conventional Commits: `type(scope): description`, with an optional scope such as `person` or `statistics`.
 - Branches are named `type/short-description`, e.g. `feat/person-page` or `fix/statistics-memory-budget`.
 - Endpoints are authenticated (`ensureAuthenticated`), validate their input, and answer 400 for malformed input, 404 for an unknown ID and 503 when a derived table is missing. Validation happens before any query runs.
+- `ensureAuthenticated` accepts the JWT minted at WCA login, or `Bearer <SERVICE_TOKEN>` when that env var is set. The service token works for GET only (anything else is 403) and sets `req.user` to `SERVICE_USER`, which has no WCA account: code reading the user must not assume `wcaUserId` or `wcaId`, and a write endpoint must stay non-GET.
 - Use invented WCA IDs and values in tests and fixtures, never rows copied from the real export.
