@@ -4,7 +4,6 @@ import express, { Request, Response } from "express";
 import cors from "cors";
 import morgan from "morgan";
 import mysql, { RowDataPacket } from "mysql2/promise";
-import session from "express-session";
 import { loginWithWca, ensureAuthenticated } from "./wca_oauth";
 import { getChain, competitionsTogether, podiumsTogether, staffedTogether } from "./relations";
 import { getCompetitionAchievements, searchCompetitions } from "./achievements";
@@ -43,13 +42,6 @@ app.use(
 );
 app.use(morgan("combined"));
 app.use(express.json());
-app.use(
-  session({
-    secret: process.env.SESSION_SECRET || "secret",
-    resave: false,
-    saveUninitialized: true,
-  })
-);
 
 const pool = mysql.createPool({
   host: process.env.DB_HOST || "localhost",
