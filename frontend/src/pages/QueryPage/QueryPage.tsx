@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { backendRequest } from "../../utils/request";
 import { Editor, useMonaco, type Monaco } from "@monaco-editor/react";
 import { useSearchParams } from "react-router-dom";
@@ -314,6 +314,13 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
     }
   };
 
+  // The editor binds its shortcut once, on mount, so it calls through this ref to reach the
+  // handler of the latest render rather than the one from the first.
+  const executeFromShortcut = useRef(() => {});
+  executeFromShortcut.current = () => {
+    if (!isLoading) handleExecute(1);
+  };
+
   const handleShare = () => {
     const base = window.location.origin + window.location.pathname;
     navigator.clipboard.writeText(`${base}?query=${encodeURIComponent(query)}`);
@@ -397,6 +404,18 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
             defaultLanguage="sql"
             value={query}
             onChange={(val) => setQuery(val || "")}
+            onMount={(editor, monacoInstance) => {
+              const { KeyMod, KeyCode } = monacoInstance;
+              // Ctrl+Enter everywhere, and Cmd+Enter as well on macOS.
+              [
+                KeyMod.CtrlCmd | KeyCode.Enter,
+                KeyMod.WinCtrl | KeyCode.Enter,
+              ].forEach((keybinding) =>
+                editor.addCommand(keybinding, () =>
+                  executeFromShortcut.current()
+                )
+              );
+            }}
             options={{ minimap: { enabled: false }, fontSize: 14 }}
           />
         </div>
@@ -406,6 +425,12 @@ const QueryPage: React.FC<QueryPageProps> = ({ token }) => {
           rows={4}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+              e.preventDefault();
+              executeFromShortcut.current();
+            }
+          }}
           placeholder="Enter query..."
         />
       )}
