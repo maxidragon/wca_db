@@ -2,16 +2,25 @@ import { Pool, RowDataPacket } from "mysql2/promise";
 
 const COMPETITION_MILESTONES = [100, 150, 200, 250, 300, 350, 400];
 const DELEGATE_MILESTONES = [100, 150, 200, 250, 300, 350, 400];
-const ATTEMPT_MILESTONES = [
-  1000,
-  2137,
-  5000,
-  10000,
-  15000,
-  20000,
-  21370,
-  25000,
-];
+const ATTEMPT_MILESTONES = [1000, 2137, 5000, 10000, 15000, 20000, 21370];
+// Past 20,000, every further thousand is a milestone too.
+const ATTEMPT_MILESTONE_STEP = 1000;
+const ATTEMPT_MILESTONE_STEP_FROM = 20000;
+
+// The successful-attempt milestones a career count passes going from `before` to `after`.
+export function attemptMilestonesCrossed(before: number, after: number): number[] {
+  const crossed = new Set(
+    ATTEMPT_MILESTONES.filter((milestone) => before < milestone && after >= milestone)
+  );
+  const firstStep = Math.max(
+    ATTEMPT_MILESTONE_STEP_FROM + ATTEMPT_MILESTONE_STEP,
+    (Math.floor(before / ATTEMPT_MILESTONE_STEP) + 1) * ATTEMPT_MILESTONE_STEP
+  );
+  for (let milestone = firstStep; milestone <= after; milestone += ATTEMPT_MILESTONE_STEP) {
+    crossed.add(milestone);
+  }
+  return [...crossed].sort((a, b) => a - b);
+}
 const TOGETHER_MILESTONES = [100, 150, 200];
 
 interface CompetitionRow extends RowDataPacket {
@@ -236,17 +245,15 @@ export async function getCompetitionAchievements(
         const row = attemptsById.get(wcaId);
         const before = Number(row?.successful_before || 0);
         const after = before + Number(row?.successful_at_competition || 0);
-        for (const milestone of ATTEMPT_MILESTONES) {
-          if (before < milestone && after >= milestone) {
-            successfulAttemptMilestones.push({
-              wca_id: wcaId,
-              name: nameById.get(wcaId) || wcaId,
-              milestone,
-              count_before: before,
-              count_after: after,
-              estimated: false,
-            });
-          }
+        for (const milestone of attemptMilestonesCrossed(before, after)) {
+          successfulAttemptMilestones.push({
+            wca_id: wcaId,
+            name: nameById.get(wcaId) || wcaId,
+            milestone,
+            count_before: before,
+            count_after: after,
+            estimated: false,
+          });
         }
       }
     } else {
@@ -298,17 +305,15 @@ export async function getCompetitionAchievements(
           }
           running += expectedSuccesses;
         }
-        for (const milestone of ATTEMPT_MILESTONES) {
-          if (before < milestone && after >= milestone) {
-            successfulAttemptMilestones.push({
-              wca_id: wcaId,
-              name: nameById.get(wcaId) || wcaId,
-              milestone,
-              count_before: before,
-              count_after: after,
-              estimated: true,
-            });
-          }
+        for (const milestone of attemptMilestonesCrossed(before, after)) {
+          successfulAttemptMilestones.push({
+            wca_id: wcaId,
+            name: nameById.get(wcaId) || wcaId,
+            milestone,
+            count_before: before,
+            count_after: after,
+            estimated: true,
+          });
         }
       }
     }
