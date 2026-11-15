@@ -12,6 +12,7 @@ Notes for working on this repository. The user-facing overview is in [README.md]
 - [docs/achievements.md](docs/achievements.md)
 - [docs/qualifications.md](docs/qualifications.md)
 - [docs/upcoming-competitions.md](docs/upcoming-competitions.md)
+- [docs/deploy.md](docs/deploy.md): releases, the backend restart and the nginx setup
 
 Read the relevant doc before changing a feature, and update it in the same change when behaviour, an endpoint or a performance trade-off changes. A new page gets its own doc and a short paragraph in the README; the README stays an overview.
 
@@ -34,7 +35,7 @@ Read the relevant doc before changing a feature, and update it in the same chang
 
 `npm test` builds first. Without `TEST_DB_SOCKET`, only the filter-validation and cache-behaviour tests run; the database integration tests are skipped, and the person tests are integration tests throughout. With it, each test file creates a uniquely named fixture database on that socket as the local root user and drops only that database afterwards. The statistics tests exercise every statistic and filter combination, and check calculations and pagination. The tests never load `.env` or use its connection settings. Keep it that way: never point them at a server holding real data.
 
-CI (`.github/workflows/ci.yml`) runs the backend tests against a MariaDB installed on a GitHub-hosted runner, plus the frontend lint and build, on every pull request and every push to `main`. The deploy and nightly import workflows run on a self-hosted runner, the one that holds the imported export. CI deliberately does not use that runner.
+CI (`.github/workflows/ci.yml`) runs the backend tests against a MariaDB installed on a GitHub-hosted runner, plus the frontend lint and build, on every pull request and every push to `main`. The deploy and nightly import workflows run on a self-hosted runner, the one that holds the imported export. CI deliberately does not use that runner. Deploys publish each build as a release outside the runner's workspace and switch to it atomically; see [docs/deploy.md](docs/deploy.md).
 
 ## Data and derived tables
 

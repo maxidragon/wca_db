@@ -9,6 +9,9 @@ jobs:
   build:
     runs-on: self-hosted
     timeout-minutes: 720
+    # The backend runs from the release the last deploy published; see docs/deploy.md.
+    env:
+      DEPLOY_ROOT: ${{ vars.DEPLOY_ROOT }}
     strategy:
       matrix:
         node-version: [19.x]
@@ -55,5 +58,4 @@ jobs:
       run: ./update_database.sh
       working-directory: ./backend
     - name: Restart service
-      run: pm2 restart wca-db-backend -s || pm2 start dist/index.js --name wca-db-backend -s
-      working-directory: ./backend
+      run: .github/scripts/restart_backend.sh

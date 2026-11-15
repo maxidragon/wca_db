@@ -5,9 +5,17 @@ on:
     branches: [ "main" ]
   workflow_dispatch:
 
+# Two deploys must not publish at once; a queued one waits rather than cancelling a running one.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: self-hosted
+    # Where releases are published and served from. Must match nginx's root; see docs/deploy.md.
+    env:
+      DEPLOY_ROOT: ${{ vars.DEPLOY_ROOT }}
     strategy:
       matrix:
         node-version: [19.x]
@@ -67,9 +75,12 @@ jobs:
         set -a; . ./.env; set +a
         mariadb --user="${DB_USER:-root}" --password="${DB_PASS:-}" "${DB_NAME:-wca}" < qualification_indexes.sql
       working-directory: ./backend
+    # Copies both builds into a new release and switches the live site to it in one rename.
+    # Until here the previous release keeps serving; the checkout above never touches it.
+    - name: Publish release
+      run: .github/scripts/publish_release.sh
     - name: Restart service
-      run: pm2 restart wca-db-backend -s || pm2 start dist/index.js --name wca-db-backend -s
-      working-directory: ./backend
+      run: .github/scripts/restart_backend.sh
     # Deploys do not import. A database whose linkings or best ever ranks are missing gets
     # them here rather than at the next nightly import; a single query when they exist. After
     # the restart, because building them takes up to half an hour and the code does not
