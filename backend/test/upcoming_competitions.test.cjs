@@ -5,6 +5,7 @@ const {
   createUpcomingCompetitionsService,
   distanceKm,
   heldOnWeekend,
+  includesWeekend,
   filterUpcomingCompetitions,
   loadUpcomingCompetitions,
   parseUpcomingCompetitionsFilters,
@@ -76,7 +77,7 @@ test("parses an empty query into no filters", () => {
     radius_km: null,
     sort: "date",
     duration: "any",
-    weekend: false,
+    weekend: "any",
     registered: "all",
   });
 });
@@ -240,17 +241,34 @@ test("a weekend competition is held on Saturdays and Sundays only", () => {
   assert.equal(heldOnWeekend("2026-12-09", "2026-12-09"), false);
 });
 
+test("a competition includes a weekend when at least one day is a Saturday or a Sunday", () => {
+  // 2026-12-05 is a Saturday.
+  assert.equal(includesWeekend("2026-12-05", "2026-12-05"), true);
+  assert.equal(includesWeekend("2026-12-04", "2026-12-05"), true, "Friday to Saturday");
+  assert.equal(includesWeekend("2026-12-06", "2026-12-07"), true, "Sunday to Monday");
+  assert.equal(includesWeekend("2026-12-03", "2026-12-08"), true, "Thursday to Tuesday");
+  assert.equal(includesWeekend("2026-12-04", "2026-12-04"), false, "Friday");
+  assert.equal(includesWeekend("2026-12-07", "2026-12-11"), false, "Monday to Friday");
+});
+
+test("reads the old weekend checkbox values", () => {
+  assert.equal(parse({ weekend: "1" }).weekend, "only");
+  assert.equal(parse({ weekend: "0" }).weekend, "any");
+});
+
 test("filters by number of days and by weekend", () => {
   const competitions = [
     competition({ id: "Saturday", start_date: "2026-12-05", end_date: "2026-12-05" }),
     competition({ id: "Weekend", start_date: "2026-12-05", end_date: "2026-12-06" }),
     competition({ id: "Long", start_date: "2026-12-04", end_date: "2026-12-06" }),
     competition({ id: "Wednesday", start_date: "2026-12-09", end_date: "2026-12-09" }),
+    competition({ id: "SundayMonday", start_date: "2026-12-06", end_date: "2026-12-07" }),
   ];
   assert.deepEqual(filter(competitions, { duration: "single" }), ["Saturday", "Wednesday"]);
-  assert.deepEqual(filter(competitions, { duration: "multi" }), ["Weekend", "Long"]);
-  assert.deepEqual(filter(competitions, { weekend: "1" }), ["Saturday", "Weekend"]);
-  assert.deepEqual(filter(competitions, { weekend: "1", duration: "multi" }), ["Weekend"]);
+  assert.deepEqual(filter(competitions, { duration: "multi" }), ["Weekend", "Long", "SundayMonday"]);
+  assert.deepEqual(filter(competitions, { weekend: "only" }), ["Saturday", "Weekend"]);
+  assert.deepEqual(filter(competitions, { weekend: "only", duration: "multi" }), ["Weekend"]);
+  assert.deepEqual(filter(competitions, { weekend: "includes" }), ["Saturday", "Weekend", "Long", "SundayMonday"]);
 });
 
 test("marks, keeps only or hides the viewer's registrations", () => {
