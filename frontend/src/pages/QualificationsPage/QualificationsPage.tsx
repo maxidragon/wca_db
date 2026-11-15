@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { backendRequest } from "../../utils/request";
 import { getUserInfo } from "../../utils/wcaAuth";
-import { formatDate } from "../../utils/results";
+import { formatDateRange } from "../../utils/results";
 import CompetitionSearch from "./CompetitionSearch";
 import CustomRequirementsForm from "./CustomRequirementsForm";
 import QualificationsResults from "./QualificationsResults";
@@ -306,7 +306,7 @@ const QualificationsPage = () => {
                   {current.competition.name}
                 </a>
                 <p className="text-sm text-gray-500">
-                  {formatDate(current.competition.start_date)}
+                  {formatDateRange(current.competition.start_date, current.competition.end_date)}
                 </p>
               </div>
               {!editable && (

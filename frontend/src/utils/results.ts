@@ -56,3 +56,24 @@ export function formatDate(date: string | null): string {
     timeZone: "UTC",
   });
 }
+
+const MONTH = new Intl.DateTimeFormat("en-US", { month: "short", timeZone: "UTC" });
+
+// "Nov 14, 2026", "Nov 14–15, 2026", "Nov 30 – Dec 1, 2026", "Dec 31, 2026 – Jan 1, 2027".
+export function formatDateRange(start: string, end: string | null): string {
+  const startDate = new Date(`${start.slice(0, 10)}T00:00:00Z`);
+  const endDate = end ? new Date(`${end.slice(0, 10)}T00:00:00Z`) : startDate;
+  if (endDate.getTime() <= startDate.getTime()) return formatDate(start.slice(0, 10));
+
+  const startYear = startDate.getUTCFullYear();
+  const endYear = endDate.getUTCFullYear();
+  if (startYear !== endYear) {
+    return `${formatDate(start.slice(0, 10))} – ${formatDate(end!.slice(0, 10))}`;
+  }
+  const startMonth = MONTH.format(startDate);
+  const endMonth = MONTH.format(endDate);
+  if (startDate.getUTCMonth() !== endDate.getUTCMonth()) {
+    return `${startMonth} ${startDate.getUTCDate()} – ${endMonth} ${endDate.getUTCDate()}, ${endYear}`;
+  }
+  return `${startMonth} ${startDate.getUTCDate()}–${endDate.getUTCDate()}, ${endYear}`;
+}

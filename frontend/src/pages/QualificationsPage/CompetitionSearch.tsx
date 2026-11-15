@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { backendRequest } from "../../utils/request";
-import { formatDate } from "../../utils/results";
+import { formatDateRange } from "../../utils/results";
 import type { Competition } from "./requirements";
 
 /**
@@ -112,12 +112,9 @@ export default function CompetitionSearch({
               onClick={() => select(competition.id)}
               className="flex w-full cursor-pointer items-center justify-between gap-4 border-b border-gray-100 px-4 py-3 text-left last:border-0 hover:bg-blue-50"
             >
-              <span>
-                <span className="block text-sm font-medium text-gray-800">{competition.name}</span>
-                <span className="block text-xs text-gray-400">{competition.id}</span>
-              </span>
+              <span className="text-sm font-medium text-gray-800">{competition.name}</span>
               <span className="shrink-0 text-xs text-gray-500">
-                {formatDate(competition.start_date)}
+                {formatDateRange(competition.start_date, competition.end_date)}
               </span>
             </button>
           ))}

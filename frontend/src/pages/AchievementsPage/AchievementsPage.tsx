@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { backendRequest } from "../../utils/request";
+import { formatDateRange } from "../../utils/results";
 
 const WCA_ORIGIN = "https://www.worldcubeassociation.org";
 
@@ -40,15 +41,6 @@ interface AchievementsResult {
   successful_attempt_milestones: AttemptMilestone[];
   together_milestones: TogetherMilestone[];
   methodology: string;
-}
-
-function formatDate(value: string): string {
-  return new Date(`${value.slice(0, 10)}T00:00:00Z`).toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    timeZone: "UTC",
-  });
 }
 
 function PersonLink({ wcaId, name }: { wcaId: string; name: string }) {
@@ -241,11 +233,10 @@ export default function AchievementsPage() {
                 onClick={() => void loadAchievements(competition.id)}
                 className="flex w-full items-center justify-between gap-4 border-b border-gray-100 px-4 py-3 text-left last:border-0 hover:bg-blue-50"
               >
-                <span>
-                  <span className="block text-sm font-medium text-gray-800">{competition.name}</span>
-                  <span className="block text-xs text-gray-400">{competition.id}</span>
+                <span className="text-sm font-medium text-gray-800">{competition.name}</span>
+                <span className="shrink-0 text-xs text-gray-500">
+                  {formatDateRange(competition.start_date, competition.end_date)}
                 </span>
-                <span className="shrink-0 text-xs text-gray-500">{formatDate(competition.start_date)}</span>
               </button>
             ))}
           </div>
@@ -273,7 +264,7 @@ export default function AchievementsPage() {
                   {result.competition.name}
                 </a>
                 <p className="mt-1 text-sm text-slate-300">
-                  {formatDate(result.competition.start_date)} · {result.projected && result.accepted_registrations !== null
+                  {formatDateRange(result.competition.start_date, result.competition.end_date)} · {result.projected && result.accepted_registrations !== null
                     ? `${result.accepted_registrations.toLocaleString()} accepted registrations`
                     : `${result.roster_size.toLocaleString()} competitors`}
                 </p>
