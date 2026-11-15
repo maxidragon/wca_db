@@ -3,6 +3,8 @@ const assert = require("node:assert/strict");
 const mysql = require("mysql2/promise");
 const {
   createUpcomingCompetitionsService,
+  distanceKm,
+  heldOnWeekend,
   filterUpcomingCompetitions,
   loadUpcomingCompetitions,
   parseUpcomingCompetitionsFilters,
@@ -70,6 +72,11 @@ test("parses an empty query into no filters", () => {
     max_limit: null,
     registration: [],
     new_countries: false,
+    near: null,
+    radius_km: null,
+    sort: "date",
+    duration: "any",
+    weekend: false,
   });
 });
 
@@ -88,6 +95,19 @@ test("rejects malformed filters", () => {
     { new_countries: "yes" },
     { q: "x".repeat(101) },
     { q: ["a", "b"] },
+    { near: "52.2" },
+    { near: "91,0" },
+    { near: "0,181" },
+    { near: "52.2,abc" },
+    { near: "1e1,2" },
+    { radius_km: "50" },
+    { near: "52,21", radius_km: "0" },
+    { near: "52,21", radius_km: "25000" },
+    { near: "52,21", radius_km: "2.5" },
+    { sort: "distance" },
+    { near: "52,21", sort: "name" },
+    { duration: "two" },
+    { weekend: "true" },
   ]) {
     assert.throws(() => parse(query), UpcomingCompetitionsInputError, JSON.stringify(query));
   }
@@ -170,6 +190,65 @@ test("countries not competed in leave out those countries and multi-country regi
     competition({ id: "Multi", country_id: "XE" }),
   ];
   assert.deepEqual(filter(competitions, { new_countries: "1" }, new Set(["Poland"])), ["Abroad"]);
+});
+
+test("parses a centre, a radius and a distance sort", () => {
+  const filters = parse({ near: "52.229, -21.012", radius_km: "150", sort: "distance" });
+  assert.deepEqual(filters.near, { latitude: 52.229, longitude: -21.012 });
+  assert.equal(filters.radius_km, 150);
+  assert.equal(filters.sort, "distance");
+  // A centre alone only adds distances; it filters nothing.
+  assert.equal(parse({ near: "0,0" }).radius_km, null);
+});
+
+test("measures great-circle distances", () => {
+  // One degree of latitude is about 111 km anywhere.
+  assert.equal(Math.round(distanceKm({ latitude: 10, longitude: 30 }, { latitude: 11, longitude: 30 })), 111);
+  // Across the antimeridian is the short way round.
+  assert.equal(Math.round(distanceKm({ latitude: 0, longitude: 179.5 }, { latitude: 0, longitude: -179.5 })), 111);
+  assert.equal(distanceKm({ latitude: 5, longitude: 5 }, { latitude: 5, longitude: 5 }), 0);
+});
+
+test("a radius keeps nearby venues, and distance sorts nearest first", () => {
+  const competitions = [
+    competition({ id: "Far", start_date: "2026-12-01", latitude: 13, longitude: 30 }),
+    competition({ id: "Nowhere", start_date: "2026-12-02", latitude: null, longitude: null }),
+    competition({ id: "Near", start_date: "2026-12-03", latitude: 10.5, longitude: 30 }),
+    competition({ id: "Here", start_date: "2026-12-04", latitude: 10, longitude: 30 }),
+  ];
+  const near = "10,30";
+  assert.deepEqual(filter(competitions, { near }), ["Far", "Nowhere", "Near", "Here"], "a centre alone filters nothing");
+  assert.deepEqual(filter(competitions, { near, radius_km: "100" }), ["Near", "Here"], "no venue, no distance");
+  assert.deepEqual(filter(competitions, { near, sort: "distance" }), ["Here", "Near", "Far", "Nowhere"]);
+
+  const filters = parse({ near });
+  const [far] = filterUpcomingCompetitions(competitions, filters, { now: NOW, regionKind: "world", competedCountries: null });
+  assert.equal(far.distance_km, 334);
+  const plain = filterUpcomingCompetitions(competitions, parse({}), { now: NOW, regionKind: "world", competedCountries: null });
+  assert.ok(plain.every((c) => c.distance_km === null), "no centre, no distances");
+});
+
+test("a weekend competition is held on Saturdays and Sundays only", () => {
+  // 2026-12-05 is a Saturday.
+  assert.equal(heldOnWeekend("2026-12-05", "2026-12-05"), true);
+  assert.equal(heldOnWeekend("2026-12-06", "2026-12-06"), true);
+  assert.equal(heldOnWeekend("2026-12-05", "2026-12-06"), true);
+  assert.equal(heldOnWeekend("2026-12-04", "2026-12-06"), false, "Friday to Sunday");
+  assert.equal(heldOnWeekend("2026-12-06", "2026-12-07"), false, "Sunday to Monday");
+  assert.equal(heldOnWeekend("2026-12-09", "2026-12-09"), false);
+});
+
+test("filters by number of days and by weekend", () => {
+  const competitions = [
+    competition({ id: "Saturday", start_date: "2026-12-05", end_date: "2026-12-05" }),
+    competition({ id: "Weekend", start_date: "2026-12-05", end_date: "2026-12-06" }),
+    competition({ id: "Long", start_date: "2026-12-04", end_date: "2026-12-06" }),
+    competition({ id: "Wednesday", start_date: "2026-12-09", end_date: "2026-12-09" }),
+  ];
+  assert.deepEqual(filter(competitions, { duration: "single" }), ["Saturday", "Wednesday"]);
+  assert.deepEqual(filter(competitions, { duration: "multi" }), ["Weekend", "Long"]);
+  assert.deepEqual(filter(competitions, { weekend: "1" }), ["Saturday", "Weekend"]);
+  assert.deepEqual(filter(competitions, { weekend: "1", duration: "multi" }), ["Weekend"]);
 });
 
 const socket = process.env.TEST_DB_SOCKET;

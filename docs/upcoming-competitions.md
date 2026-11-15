@@ -7,6 +7,9 @@ The **Upcoming** item in the Competitions menu (`/upcoming-competitions`) lists 
 - **Search:** a part of the competition's name or city.
 - **Region:** World, a continent or a country, as on the other pages. A multi-location competition (country `XE`, `XA`, …) belongs to its continent.
 - **Starting from / until:** the competition's start date falls within the range.
+- **Length:** single-day or multi-day competitions.
+- **Weekend only:** every day of the competition is a Saturday or a Sunday, so a Friday-to-Sunday competition is left out.
+- **Distance from:** a point, taken from the browser's location or a click on the map, with an optional radius in kilometres and a sort by distance. Distances are great-circle distances to the venue. A venue without coordinates has no distance: a radius leaves it out, and the distance sort puts it last. The point is rounded to three decimals (about 100 m) before it goes into the URL, so a shared link does not give away anyone's exact location.
 - **Events:** the competition holds every selected event.
 - **Championships:** include them (default), exclude them, or show only them. A championship is any row in `championships`: world, continental, national or a group of countries such as Greater China.
 - **Competitor limit:** a minimum and a maximum for the limit. A competition without a limit has no number to compare, so either bound leaves it out.
@@ -19,13 +22,13 @@ The status is worked out the way the WCA website does it, in its order: before `
 
 ## Map
 
-The map uses Leaflet with OpenStreetMap tiles, loaded only when the map is opened. A marker's colour is its registration status, and a championship gets a dark ring. It zooms to the competitions shown whenever the filters change them. A competition whose venue has no coordinates (stored as 0, 0) is only in the list, and the map says how many.
+The map uses Leaflet with OpenStreetMap tiles, loaded only when the map is opened. A marker's colour is its registration status, and a championship gets a dark ring. It zooms to the competitions shown whenever the filters change them. Clicking the map, anywhere but a marker, sets the point distances are measured from; the point and the radius are drawn on the map, and the map stays when nothing matches, so another point can be picked. A competition whose venue has no coordinates (stored as 0, 0) is only in the list, and the map says how many.
 
 ## API
 
 `GET /api/upcoming-competitions/options` (authenticated) returns `regions` (World, continents, countries without the multi-country regions) and `events` (current events, in order).
 
-`GET /api/upcoming-competitions` (authenticated) takes `q` (at most 100 characters), `region`, `from` and `to` (`YYYY-MM-DD`), `events` (comma-separated, all required), `championships` (`include`, `exclude` or `only`), `min_limit` and `max_limit` (whole numbers), `registration` (comma-separated `not_open`, `open`, `full`, `closed`) and `new_countries=1`. It returns every match ordered by start date, without pagination, as `competitions` with `total`, `viewer_wca_id`, and `competed_countries` (how many countries the viewer has competed in, when `new_countries=1`). A malformed or unknown value returns 400, and so does `new_countries=1` from an account without a WCA ID, such as the service token.
+`GET /api/upcoming-competitions` (authenticated) takes `q` (at most 100 characters), `region`, `from` and `to` (`YYYY-MM-DD`), `events` (comma-separated, all required), `championships` (`include`, `exclude` or `only`), `min_limit` and `max_limit` (whole numbers), `registration` (comma-separated `not_open`, `open`, `full`, `closed`), `new_countries=1`, `duration` (`any`, `single` or `multi`), `weekend=1`, `near` (`latitude,longitude` in degrees), `radius_km` (1–20038, needs `near`) and `sort` (`date`, or `distance`, which needs `near`). With `near`, each competition carries `distance_km`, rounded to whole kilometres, or null without a venue. It returns every match ordered by start date, or by distance, without pagination, as `competitions` with `total`, `viewer_wca_id`, and `competed_countries` (how many countries the viewer has competed in, when `new_countries=1`). A malformed or unknown value returns 400, and so does `new_countries=1` from an account without a WCA ID, such as the service token.
 
 ## Performance
 

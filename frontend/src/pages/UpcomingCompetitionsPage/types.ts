@@ -15,6 +15,7 @@ export interface UpcomingCompetition {
   registration_open: string | null;
   registration_close: string | null;
   registration_status: RegistrationStatus;
+  distance_km: number | null;
   championships: { type: string; name: string }[];
   events: string[];
 }

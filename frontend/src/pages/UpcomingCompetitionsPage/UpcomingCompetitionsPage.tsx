@@ -28,7 +28,24 @@ const FILTER_KEYS = [
   "max_limit",
   "registration",
   "new_countries",
+  "near",
+  "radius_km",
+  "sort",
+  "duration",
+  "weekend",
 ];
+
+// About 100 m: enough to measure distances, and a shared link does not pinpoint anyone's home.
+const roundCoordinate = (value: number) => Math.round(value * 1000) / 1000;
+const formatCentre = (near: string) =>
+  near
+    .split(",")
+    .map((part, i) => {
+      const value = Number(part);
+      const hemisphere = i === 0 ? (value >= 0 ? "N" : "S") : value >= 0 ? "E" : "W";
+      return `${Math.abs(value).toFixed(3)}° ${hemisphere}`;
+    })
+    .join(", ");
 
 const inputClass =
   "w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400";
@@ -88,6 +105,8 @@ export default function UpcomingCompetitionsPage() {
   const selectedStatuses = (searchParams.get("registration") || "").split(",").filter(Boolean);
   const championships = searchParams.get("championships") || "include";
   const hasFilters = filterQuery !== "";
+  const near = searchParams.get("near");
+  const [locating, setLocating] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -133,7 +152,38 @@ export default function UpcomingCompetitionsPage() {
         else next.delete(key);
         return next;
       },
-      { replace: key === "q" || key.endsWith("_limit") },
+      { replace: key === "q" || key.endsWith("_limit") || key === "radius_km" },
+    );
+  };
+  const updateMany = (values: Record<string, string>) =>
+    setSearchParams((previous) => {
+      const next = new URLSearchParams(previous);
+      for (const [key, value] of Object.entries(values)) {
+        if (value) next.set(key, value);
+        else next.delete(key);
+      }
+      return next;
+    });
+  const setCentre = (latitude: number, longitude: number) =>
+    update("near", `${roundCoordinate(latitude)},${roundCoordinate(longitude)}`);
+  // Without a centre there is nothing to measure from, so the radius and the sort go with it.
+  const clearCentre = () => updateMany({ near: "", radius_km: "", sort: "" });
+  const locate = () => {
+    if (!navigator.geolocation) {
+      setError("This browser cannot share its location. Click the map to pick a point instead.");
+      return;
+    }
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setLocating(false);
+        setCentre(position.coords.latitude, position.coords.longitude);
+      },
+      () => {
+        setLocating(false);
+        setError("Could not get your location. Allow it in the browser, or click the map to pick a point.");
+      },
+      { maximumAge: 10 * 60 * 1000, timeout: 15000 },
     );
   };
   const toggleIn = (key: string, selected: string[], id: string) =>
@@ -263,6 +313,101 @@ export default function UpcomingCompetitionsPage() {
           </fieldset>
         </div>
 
+        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="text-sm font-medium text-gray-700 sm:col-span-2">
+            Distance from
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              {near ? (
+                <>
+                  <span className="rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 font-normal tabular-nums">
+                    {formatCentre(near)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={clearCentre}
+                    className="cursor-pointer text-sm font-normal text-blue-600 hover:underline"
+                  >
+                    Clear
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={locate}
+                    disabled={locating}
+                    className="cursor-pointer rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50 disabled:cursor-wait disabled:opacity-60"
+                  >
+                    {locating ? "Locating…" : "Use my location"}
+                  </button>
+                  <span className="font-normal text-gray-500">
+                    or{" "}
+                    {view === "map" ? (
+                      "click the map"
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => update("view", "map")}
+                        className="cursor-pointer text-blue-600 hover:underline"
+                      >
+                        click the map
+                      </button>
+                    )}
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
+          <label className="text-sm font-medium text-gray-700">
+            Within (km)
+            <div className="mt-1">
+              <DebouncedInput
+                type="number"
+                min={1}
+                inputMode="numeric"
+                placeholder={near ? "Any distance" : "Pick a point first"}
+                disabled={!near}
+                value={searchParams.get("radius_km") || ""}
+                onCommit={(value) => update("radius_km", value)}
+              />
+            </div>
+          </label>
+          <label className="text-sm font-medium text-gray-700">
+            Sort by
+            <select
+              className={`${inputClass} mt-1`}
+              value={near ? searchParams.get("sort") || "date" : "date"}
+              disabled={!near}
+              onChange={(e) => update("sort", e.target.value === "date" ? "" : e.target.value)}
+            >
+              <option value="date">Date</option>
+              <option value="distance">Distance</option>
+            </select>
+          </label>
+          <label className="text-sm font-medium text-gray-700">
+            Length
+            <select
+              className={`${inputClass} mt-1`}
+              value={searchParams.get("duration") || "any"}
+              onChange={(e) => update("duration", e.target.value === "any" ? "" : e.target.value)}
+            >
+              <option value="any">Any length</option>
+              <option value="single">Single day</option>
+              <option value="multi">Multi-day</option>
+            </select>
+          </label>
+          <label className="flex items-center gap-2 self-end pb-2 text-sm font-medium text-gray-700">
+            <input
+              type="checkbox"
+              checked={searchParams.get("weekend") === "1"}
+              onChange={(e) => update("weekend", e.target.checked ? "1" : "")}
+            />
+            <span>
+              Weekend only <span className="font-normal text-gray-500">(Sat–Sun)</span>
+            </span>
+          </label>
+        </div>
+
         <fieldset className="mt-4">
           <legend className="text-sm font-medium text-gray-700">
             Events <span className="font-normal text-gray-500">(competitions holding every selected event)</span>
@@ -348,14 +493,20 @@ export default function UpcomingCompetitionsPage() {
       )}
 
       {result && result.total === 0 && !isLoading && (
-        <p className="rounded-xl border border-gray-200 bg-white p-8 text-center text-gray-500 shadow-sm">
+        <p className="mb-4 rounded-xl border border-gray-200 bg-white p-8 text-center text-gray-500 shadow-sm">
           No upcoming competitions match these filters.
         </p>
       )}
 
-      {result && result.total > 0 && view === "map" && (
+      {/* The map stays when nothing matches, so a new point can still be picked on it. */}
+      {result && view === "map" && (
         <Suspense fallback={<p className="text-sm text-gray-500">Loading the map…</p>}>
-          <CompetitionsMap competitions={result.competitions} />
+          <CompetitionsMap
+            competitions={result.competitions}
+            near={near}
+            radiusKm={Number(searchParams.get("radius_km")) || null}
+            onPick={setCentre}
+          />
         </Suspense>
       )}
 
@@ -367,6 +518,7 @@ export default function UpcomingCompetitionsPage() {
                 <th className="px-4 py-3">Date</th>
                 <th className="px-4 py-3">Competition</th>
                 <th className="px-4 py-3">Location</th>
+                {near && <th className="px-4 py-3 text-right">Distance</th>}
                 <th className="px-4 py-3 text-right">Competitors</th>
                 <th className="px-4 py-3">Registration</th>
               </tr>
@@ -404,6 +556,11 @@ export default function UpcomingCompetitionsPage() {
                     <td className="px-4 py-3 text-gray-600">
                       {competition.city}, {competition.country_name}
                     </td>
+                    {near && (
+                      <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-gray-600">
+                        {competition.distance_km === null ? "—" : `${competition.distance_km.toLocaleString()} km`}
+                      </td>
+                    )}
                     <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-gray-600">
                       {competitorsLabel(competition)}
                     </td>

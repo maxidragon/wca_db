@@ -5,6 +5,12 @@ export class UpcomingCompetitionsInputError extends Error {}
 export const REGISTRATION_STATUSES = ["not_open", "open", "full", "closed"] as const;
 export type RegistrationStatus = (typeof REGISTRATION_STATUSES)[number];
 
+export const DURATIONS = ["any", "single", "multi"] as const;
+export type Duration = (typeof DURATIONS)[number];
+
+export const SORTS = ["date", "distance"] as const;
+export type Sort = (typeof SORTS)[number];
+
 export const CHAMPIONSHIP_MODES = ["include", "exclude", "only"] as const;
 export type ChampionshipMode = (typeof CHAMPIONSHIP_MODES)[number];
 
@@ -52,10 +58,18 @@ export interface UpcomingCompetitionsFilters {
   max_limit: number | null;
   registration: RegistrationStatus[];
   new_countries: boolean;
+  near: { latitude: number; longitude: number } | null;
+  radius_km: number | null;
+  sort: Sort;
+  duration: Duration;
+  weekend: boolean;
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_LIMIT_FILTER = 100000;
+// Half the Earth's circumference: every point is within it.
+const MAX_RADIUS_KM = 20038;
+const DECIMAL_RE = /^-?\d{1,3}(\.\d+)?$/;
 
 function isValidDate(value: string): boolean {
   if (!DATE_RE.test(value)) return false;
@@ -135,6 +149,45 @@ export function parseUpcomingCompetitionsFilters(
     throw new UpcomingCompetitionsInputError("new_countries must be 0 or 1");
   }
 
+  const nearValue = scalar(query, "near");
+  let near: UpcomingCompetitionsFilters["near"] = null;
+  if (nearValue) {
+    const parts = nearValue.split(",").map((part) => part.trim());
+    const [latitude, longitude] = parts.map(Number);
+    if (
+      parts.length !== 2 ||
+      !parts.every((part) => DECIMAL_RE.test(part)) ||
+      Math.abs(latitude) > 90 ||
+      Math.abs(longitude) > 180
+    ) {
+      throw new UpcomingCompetitionsInputError("near must be latitude,longitude in degrees");
+    }
+    near = { latitude, longitude };
+  }
+
+  const radiusValue = scalar(query, "radius_km");
+  let radius_km: number | null = null;
+  if (radiusValue) {
+    if (!/^\d+$/.test(radiusValue) || Number(radiusValue) < 1 || Number(radiusValue) > MAX_RADIUS_KM) {
+      throw new UpcomingCompetitionsInputError(`radius_km must be a whole number from 1 to ${MAX_RADIUS_KM}`);
+    }
+    if (!near) throw new UpcomingCompetitionsInputError("radius_km needs near");
+    radius_km = Number(radiusValue);
+  }
+
+  const sort = (scalar(query, "sort") || "date") as Sort;
+  if (!SORTS.includes(sort)) throw new UpcomingCompetitionsInputError("sort must be date or distance");
+  if (sort === "distance" && !near) throw new UpcomingCompetitionsInputError("Sorting by distance needs near");
+
+  const duration = (scalar(query, "duration") || "any") as Duration;
+  if (!DURATIONS.includes(duration)) {
+    throw new UpcomingCompetitionsInputError("duration must be one of any, single, multi");
+  }
+  const weekend = scalar(query, "weekend");
+  if (weekend !== "" && weekend !== "0" && weekend !== "1") {
+    throw new UpcomingCompetitionsInputError("weekend must be 0 or 1");
+  }
+
   return {
     q,
     region,
@@ -146,7 +199,40 @@ export function parseUpcomingCompetitionsFilters(
     max_limit,
     registration,
     new_countries: newCountries === "1",
+    near,
+    radius_km,
+    sort,
+    duration,
+    weekend: weekend === "1",
   };
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const dayNumber = (date: string) => Date.parse(`${date}T00:00:00Z`) / DAY_MS;
+
+/** Whether every day from start to end is a Saturday or a Sunday. */
+export function heldOnWeekend(start: string, end: string): boolean {
+  for (let day = dayNumber(start); day <= dayNumber(end); day++) {
+    const weekday = new Date(day * DAY_MS).getUTCDay();
+    if (weekday !== 0 && weekday !== 6) return false;
+  }
+  return true;
+}
+
+const EARTH_RADIUS_KM = 6371;
+const radians = (degrees: number) => (degrees * Math.PI) / 180;
+
+/** Great-circle distance in kilometres (haversine). */
+export function distanceKm(
+  a: { latitude: number; longitude: number },
+  b: { latitude: number; longitude: number },
+): number {
+  const dLat = radians(b.latitude - a.latitude);
+  const dLon = radians(b.longitude - a.longitude);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(radians(a.latitude)) * Math.cos(radians(b.latitude)) * Math.sin(dLon / 2) ** 2;
+  return 2 * EARTH_RADIUS_KM * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
 /**
@@ -184,10 +270,15 @@ export function filterUpcomingCompetitions(
   },
 ) {
   const term = filters.q.toLowerCase();
-  return competitions
+  const { near } = filters;
+  const matches = competitions
     .map((competition) => ({
       ...competition,
       registration_status: registrationStatus(competition, context.now),
+      distance_km:
+        near && competition.latitude !== null && competition.longitude !== null
+          ? Math.round(distanceKm(near, { latitude: competition.latitude, longitude: competition.longitude }))
+          : null,
     }))
     .filter((c) => {
       if (term && !c.name.toLowerCase().includes(term) && !c.city.toLowerCase().includes(term)) {
@@ -196,6 +287,9 @@ export function filterUpcomingCompetitions(
       if (context.regionKind === "continent" && c.continent_id !== filters.region) return false;
       if (context.regionKind === "country" && c.country_id !== filters.region) return false;
       if (filters.from && c.start_date < filters.from) return false;
+      if (filters.duration === "single" && c.end_date !== c.start_date) return false;
+      if (filters.duration === "multi" && c.end_date === c.start_date) return false;
+      if (filters.weekend && !heldOnWeekend(c.start_date, c.end_date)) return false;
       if (filters.to && c.start_date > filters.to) return false;
       if (filters.events.some((id) => !c.events.includes(id))) return false;
       if (filters.championships === "exclude" && c.championships.length > 0) return false;
@@ -213,8 +307,22 @@ export function filterUpcomingCompetitions(
         if (isMultiCountryRegion(c.country_id)) return false;
         if (context.competedCountries.has(c.country_id)) return false;
       }
+      // A venue without coordinates has no distance, so a radius leaves it out.
+      if (filters.radius_km !== null && (c.distance_km === null || c.distance_km > filters.radius_km)) {
+        return false;
+      }
       return true;
     });
+  if (filters.sort === "distance") {
+    // Stable, so equal distances keep date order; competitions without a venue come last.
+    matches.sort((a, b) => {
+      if (a.distance_km === null || b.distance_km === null) {
+        return (a.distance_km === null ? 1 : 0) - (b.distance_km === null ? 1 : 0);
+      }
+      return a.distance_km - b.distance_km;
+    });
+  }
+  return matches;
 }
 
 function isoDate(date: Date): string {

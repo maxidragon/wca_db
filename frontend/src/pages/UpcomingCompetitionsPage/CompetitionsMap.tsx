@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from "react";
-import { CircleMarker, MapContainer, Popup, TileLayer, useMap } from "react-leaflet";
+import { Circle, CircleMarker, MapContainer, Popup, TileLayer, useMap, useMapEvents } from "react-leaflet";
 import { latLngBounds } from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { formatDateRange } from "../../utils/results";
@@ -17,7 +17,8 @@ type Located = UpcomingCompetition & { latitude: number; longitude: number };
 // Zooms to the competitions shown whenever the filters change which they are.
 function FitToCompetitions({ competitions }: { competitions: Located[] }) {
   const map = useMap();
-  const key = competitions.map((c) => c.id).join(",");
+  // Sorted, so re-sorting the same competitions by distance keeps the view.
+  const key = competitions.map((c) => c.id).sort().join(",");
   useEffect(() => {
     if (competitions.length === 0) return;
     const bounds = latLngBounds(competitions.map((c) => [c.latitude, c.longitude]));
@@ -28,7 +29,29 @@ function FitToCompetitions({ competitions }: { competitions: Located[] }) {
   return null;
 }
 
-export default function CompetitionsMap({ competitions }: { competitions: UpcomingCompetition[] }) {
+// A click on the map, not on a marker, picks the point distances are measured from.
+function PickOnClick({ onPick }: { onPick: (latitude: number, longitude: number) => void }) {
+  useMapEvents({
+    click(event) {
+      const { lat, lng } = event.latlng.wrap();
+      onPick(lat, lng);
+    },
+  });
+  return null;
+}
+
+export default function CompetitionsMap({
+  competitions,
+  near,
+  radiusKm,
+  onPick,
+}: {
+  competitions: UpcomingCompetition[];
+  near: string | null;
+  radiusKm: number | null;
+  onPick: (latitude: number, longitude: number) => void;
+}) {
+  const centre = near ? (near.split(",").map(Number) as [number, number]) : null;
   const located = useMemo(
     () =>
       competitions.filter(
@@ -48,6 +71,23 @@ export default function CompetitionsMap({ competitions }: { competitions: Upcomi
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
           <FitToCompetitions competitions={located} />
+          <PickOnClick onPick={onPick} />
+          {centre && radiusKm && (
+            <Circle
+              center={centre}
+              radius={radiusKm * 1000}
+              interactive={false}
+              pathOptions={{ color: "#2563eb", weight: 1.5, fillOpacity: 0.06, dashArray: "6 6" }}
+            />
+          )}
+          {centre && (
+            <CircleMarker
+              center={centre}
+              radius={5}
+              interactive={false}
+              pathOptions={{ color: "#ffffff", weight: 2, fillColor: "#dc2626", fillOpacity: 1 }}
+            />
+          )}
           {located.map((competition) => {
             const status = statusInfo(competition.registration_status);
             return (
@@ -55,6 +95,7 @@ export default function CompetitionsMap({ competitions }: { competitions: Upcomi
                 key={competition.id}
                 center={[competition.latitude, competition.longitude]}
                 radius={competition.championships.length > 0 ? 9 : 7}
+                bubblingMouseEvents={false}
                 pathOptions={{
                   color: competition.championships.length > 0 ? "#111827" : "#ffffff",
                   weight: competition.championships.length > 0 ? 2.5 : 1.5,
@@ -84,6 +125,11 @@ export default function CompetitionsMap({ competitions }: { competitions: Upcomi
                     <div className="text-gray-600">
                       Competitors: {competitorsLabel(competition)}
                     </div>
+                    {competition.distance_km !== null && (
+                      <div className="text-gray-600">
+                        Distance: {competition.distance_km.toLocaleString()} km
+                      </div>
+                    )}
                     <div>
                       <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${status.badge}`}>
                         {status.label}
@@ -108,6 +154,7 @@ export default function CompetitionsMap({ competitions }: { competitions: Upcomi
           <span className="inline-block h-3 w-3 rounded-full border-2 border-gray-900 bg-white" />
           Championship
         </span>
+        <span className="text-gray-500">Click the map to measure distances from that point.</span>
       </div>
       {missing > 0 && (
         <p className="mt-2 text-xs text-gray-500">
