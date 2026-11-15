@@ -1,3 +1,12 @@
+export type MyRegistration = "accepted" | "pending" | "waiting_list";
+
+export const MY_REGISTRATION_LABELS: Record<MyRegistration, string> = {
+  accepted: "You're registered",
+  pending: "Your registration is pending",
+  waiting_list: "You're on the waiting list",
+};
+export const REGISTERED_COLOR = "#2563eb";
+
 export type RegistrationStatus = "not_open" | "open" | "full" | "closed";
 
 export interface UpcomingCompetition {
@@ -16,6 +25,7 @@ export interface UpcomingCompetition {
   registration_close: string | null;
   registration_status: RegistrationStatus;
   distance_km: number | null;
+  my_registration: MyRegistration | null;
   championships: { type: string; name: string }[];
   events: string[];
 }
@@ -24,6 +34,7 @@ export interface UpcomingCompetitionsResult {
   competitions: UpcomingCompetition[];
   total: number;
   viewer_wca_id: string | null;
+  can_filter_registrations: boolean;
   competed_countries: number | null;
 }
 

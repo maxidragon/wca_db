@@ -8,6 +8,13 @@ export type RegistrationStatus = (typeof REGISTRATION_STATUSES)[number];
 export const DURATIONS = ["any", "single", "multi"] as const;
 export type Duration = (typeof DURATIONS)[number];
 
+export const REGISTERED_MODES = ["all", "only", "hide"] as const;
+export type RegisteredMode = (typeof REGISTERED_MODES)[number];
+
+/** Registrations that still hold, or may still get, a place; cancelled and rejected ones do not. */
+export const MY_REGISTRATION_STATUSES = ["accepted", "pending", "waiting_list"] as const;
+export type MyRegistrationStatus = (typeof MY_REGISTRATION_STATUSES)[number];
+
 export const SORTS = ["date", "distance"] as const;
 export type Sort = (typeof SORTS)[number];
 
@@ -63,6 +70,7 @@ export interface UpcomingCompetitionsFilters {
   sort: Sort;
   duration: Duration;
   weekend: boolean;
+  registered: RegisteredMode;
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -188,6 +196,11 @@ export function parseUpcomingCompetitionsFilters(
     throw new UpcomingCompetitionsInputError("weekend must be 0 or 1");
   }
 
+  const registered = (scalar(query, "registered") || "all") as RegisteredMode;
+  if (!REGISTERED_MODES.includes(registered)) {
+    throw new UpcomingCompetitionsInputError("registered must be one of all, only, hide");
+  }
+
   return {
     q,
     region,
@@ -204,6 +217,7 @@ export function parseUpcomingCompetitionsFilters(
     sort,
     duration,
     weekend: weekend === "1",
+    registered,
   };
 }
 
@@ -267,14 +281,18 @@ export function filterUpcomingCompetitions(
     now: Date;
     regionKind: "world" | "continent" | "country";
     competedCountries: Set<string> | null;
+    /** The viewer's registrations by competition; null when the viewer has no WCA account. */
+    myRegistrations?: Map<string, MyRegistrationStatus> | null;
   },
 ) {
+  const myRegistrations = context.myRegistrations ?? null;
   const term = filters.q.toLowerCase();
   const { near } = filters;
   const matches = competitions
     .map((competition) => ({
       ...competition,
       registration_status: registrationStatus(competition, context.now),
+      my_registration: myRegistrations?.get(competition.id) ?? null,
       distance_km:
         near && competition.latitude !== null && competition.longitude !== null
           ? Math.round(distanceKm(near, { latitude: competition.latitude, longitude: competition.longitude }))
@@ -307,6 +325,8 @@ export function filterUpcomingCompetitions(
         if (isMultiCountryRegion(c.country_id)) return false;
         if (context.competedCountries.has(c.country_id)) return false;
       }
+      if (filters.registered === "only" && !c.my_registration) return false;
+      if (filters.registered === "hide" && c.my_registration) return false;
       // A venue without coordinates has no distance, so a radius leaves it out.
       if (filters.radius_km !== null && (c.distance_km === null || c.distance_km > filters.radius_km)) {
         return false;
@@ -461,6 +481,26 @@ export async function loadUpcomingCompetitionsOptions(pool: Pool): Promise<Upcom
 }
 
 /** Countries of every competition the competitor has a result from. */
+/**
+ * The viewer's own competing registrations that still count, by competition. Read through the
+ * index on user_id, so it costs one lookup per request.
+ */
+export async function myRegistrations(
+  pool: Pool,
+  userId: number,
+  today: string,
+): Promise<Map<string, MyRegistrationStatus>> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT reg.competition_id, reg.competing_status
+     FROM registrations reg
+     JOIN competitions c ON c.id = reg.competition_id
+     WHERE reg.user_id = ? AND reg.is_competing = 1 AND reg.deleted_at IS NULL
+       AND reg.competing_status IN (?) AND c.end_date >= ?`,
+    [userId, MY_REGISTRATION_STATUSES, today],
+  );
+  return new Map(rows.map((row) => [row.competition_id as string, row.competing_status as MyRegistrationStatus]));
+}
+
 export async function competedCountries(pool: Pool, wcaId: string): Promise<Set<string>> {
   const [rows] = await pool.query<RowDataPacket[]>(
     `SELECT DISTINCT c.country_id
@@ -503,25 +543,43 @@ export function createUpcomingCompetitionsService(pool: Pool) {
     async options() {
       return (await load())[1];
     },
-    async get(query: Record<string, unknown>, viewerWcaId: string | null) {
+    /**
+     * `viewer.userId` is the WCA account, which registrations belong to even before the
+     * competitor has a WCA ID; `viewer.wcaId` is the competitor, whom results belong to.
+     */
+    async get(
+      query: Record<string, unknown>,
+      viewer: { wcaId: string | null; userId: number | null },
+    ) {
+      const viewerWcaId = viewer.wcaId;
       const [competitions, options] = await load();
       const filters = parseUpcomingCompetitionsFilters(query, options);
+      if (filters.registered !== "all" && viewer.userId === null) {
+        throw new UpcomingCompetitionsInputError(
+          "Filtering by your registrations needs a WCA account",
+        );
+      }
       if (filters.new_countries && !viewerWcaId) {
         throw new UpcomingCompetitionsInputError(
           "Filtering by countries you have not competed in needs an account with a WCA ID",
         );
       }
-      const competed = filters.new_countries ? await competedCountries(pool, viewerWcaId!) : null;
+      const [competed, registrations] = await Promise.all([
+        filters.new_countries ? competedCountries(pool, viewerWcaId!) : null,
+        viewer.userId === null ? null : myRegistrations(pool, viewer.userId, isoDate(new Date())),
+      ]);
       const regionKind = options.regions.find((r) => r.id === filters.region)!.kind;
       const matches = filterUpcomingCompetitions(competitions, filters, {
         now: new Date(),
         regionKind,
         competedCountries: competed,
+        myRegistrations: registrations,
       });
       return {
         competitions: matches,
         total: matches.length,
         viewer_wca_id: viewerWcaId,
+        can_filter_registrations: viewer.userId !== null,
         competed_countries: competed
           ? [...competed].filter((id) => !isMultiCountryRegion(id)).length
           : null,

@@ -1,10 +1,12 @@
-import { useEffect, useMemo } from "react";
+import { Fragment, useEffect, useMemo } from "react";
 import { Circle, CircleMarker, MapContainer, Popup, TileLayer, useMap, useMapEvents } from "react-leaflet";
 import { latLngBounds } from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { formatDateRange } from "../../utils/results";
 import {
   competitorsLabel,
+  MY_REGISTRATION_LABELS,
+  REGISTERED_COLOR,
   REGISTRATION_STATUSES,
   registrationDetail,
   statusInfo,
@@ -90,55 +92,71 @@ export default function CompetitionsMap({
           )}
           {located.map((competition) => {
             const status = statusInfo(competition.registration_status);
+            const radius = competition.championships.length > 0 ? 9 : 7;
             return (
-              <CircleMarker
-                key={competition.id}
-                center={[competition.latitude, competition.longitude]}
-                radius={competition.championships.length > 0 ? 9 : 7}
-                bubblingMouseEvents={false}
-                pathOptions={{
-                  color: competition.championships.length > 0 ? "#111827" : "#ffffff",
-                  weight: competition.championships.length > 0 ? 2.5 : 1.5,
-                  fillColor: status.color,
-                  fillOpacity: 0.9,
-                }}
-              >
-                <Popup>
-                  <div className="space-y-1 text-sm">
-                    <a
-                      href={`${WCA_ORIGIN}/competitions/${competition.id}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="font-semibold"
-                    >
-                      {competition.name}
-                    </a>
-                    <div className="text-gray-600">
-                      {formatDateRange(competition.start_date, competition.end_date)} ·{" "}
-                      {competition.city}, {competition.country_name}
-                    </div>
-                    {competition.championships.length > 0 && (
+              <Fragment key={competition.id}>
+                {competition.my_registration && (
+                  // A ring around the marker; it does not take clicks, so the popup still opens.
+                  <CircleMarker
+                    center={[competition.latitude, competition.longitude]}
+                    radius={radius + 4}
+                    interactive={false}
+                    pathOptions={{ color: REGISTERED_COLOR, weight: 3, fill: false }}
+                  />
+                )}
+                <CircleMarker
+                  center={[competition.latitude, competition.longitude]}
+                  radius={radius}
+                  bubblingMouseEvents={false}
+                  pathOptions={{
+                    color: competition.championships.length > 0 ? "#111827" : "#ffffff",
+                    weight: competition.championships.length > 0 ? 2.5 : 1.5,
+                    fillColor: status.color,
+                    fillOpacity: 0.9,
+                  }}
+                >
+                  <Popup>
+                    <div className="space-y-1 text-sm">
+                      <a
+                        href={`${WCA_ORIGIN}/competitions/${competition.id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-semibold"
+                      >
+                        {competition.name}
+                      </a>
                       <div className="text-gray-600">
-                        Championship: {competition.championships.map((c) => c.name).join(", ")}
+                        {formatDateRange(competition.start_date, competition.end_date)} ·{" "}
+                        {competition.city}, {competition.country_name}
                       </div>
-                    )}
-                    <div className="text-gray-600">
-                      Competitors: {competitorsLabel(competition)}
-                    </div>
-                    {competition.distance_km !== null && (
+                      {competition.championships.length > 0 && (
+                        <div className="text-gray-600">
+                          Championship: {competition.championships.map((c) => c.name).join(", ")}
+                        </div>
+                      )}
                       <div className="text-gray-600">
-                        Distance: {competition.distance_km.toLocaleString()} km
+                        Competitors: {competitorsLabel(competition)}
                       </div>
-                    )}
-                    <div>
-                      <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${status.badge}`}>
-                        {status.label}
-                      </span>{" "}
-                      <span className="text-xs text-gray-500">{registrationDetail(competition)}</span>
+                      {competition.my_registration && (
+                        <div className="font-medium text-blue-700">
+                          {MY_REGISTRATION_LABELS[competition.my_registration]}
+                        </div>
+                      )}
+                      {competition.distance_km !== null && (
+                        <div className="text-gray-600">
+                          Distance: {competition.distance_km.toLocaleString()} km
+                        </div>
+                      )}
+                      <div>
+                        <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${status.badge}`}>
+                          {status.label}
+                        </span>{" "}
+                        <span className="text-xs text-gray-500">{registrationDetail(competition)}</span>
+                      </div>
                     </div>
-                  </div>
-                </Popup>
-              </CircleMarker>
+                  </Popup>
+                </CircleMarker>
+              </Fragment>
             );
           })}
         </MapContainer>
@@ -153,6 +171,10 @@ export default function CompetitionsMap({
         <span className="flex items-center gap-1.5">
           <span className="inline-block h-3 w-3 rounded-full border-2 border-gray-900 bg-white" />
           Championship
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block h-3.5 w-3.5 rounded-full border-[3px] bg-white" style={{ borderColor: REGISTERED_COLOR }} />
+          Registered
         </span>
         <span className="text-gray-500">Click the map to measure distances from that point.</span>
       </div>

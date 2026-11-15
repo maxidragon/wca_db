@@ -5,6 +5,7 @@ import { backendRequest } from "../../utils/request";
 import { formatDateRange } from "../../utils/results";
 import {
   competitorsLabel,
+  MY_REGISTRATION_LABELS,
   REGISTRATION_STATUSES,
   registrationDetail,
   statusInfo,
@@ -33,6 +34,7 @@ const FILTER_KEYS = [
   "sort",
   "duration",
   "weekend",
+  "registered",
 ];
 
 // About 100 m: enough to measure distances, and a shared link does not pinpoint anyone's home.
@@ -427,28 +429,44 @@ export default function UpcomingCompetitionsPage() {
           </div>
         </fieldset>
 
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-          {canFilterNewCountries ? (
-            <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
-              <input
-                type="checkbox"
-                checked={searchParams.get("new_countries") === "1"}
-                onChange={(e) => update("new_countries", e.target.checked ? "1" : "")}
-              />
-              Only countries I have not competed in
-              {result?.competed_countries != null && (
-                <span className="font-normal text-gray-500">
-                  (you have competed in {result.competed_countries})
-                </span>
-              )}
-            </label>
-          ) : result ? (
-            <span className="text-sm text-gray-500">
-              Log in with an account that has a WCA ID to find countries you have not competed in.
-            </span>
-          ) : (
-            <span />
-          )}
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+            {(result?.can_filter_registrations || searchParams.has("registered")) && (
+              <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                My registrations
+                <select
+                  className="rounded-lg border border-gray-300 bg-white px-2 py-1 text-sm font-normal focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  value={searchParams.get("registered") || "all"}
+                  onChange={(e) => update("registered", e.target.value === "all" ? "" : e.target.value)}
+                >
+                  <option value="all">Show all</option>
+                  <option value="only">Only where I'm registered</option>
+                  <option value="hide">Hide where I'm registered</option>
+                </select>
+              </label>
+            )}
+            {canFilterNewCountries ? (
+              <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={searchParams.get("new_countries") === "1"}
+                  onChange={(e) => update("new_countries", e.target.checked ? "1" : "")}
+                />
+                Only countries I have not competed in
+                {result?.competed_countries != null && (
+                  <span className="font-normal text-gray-500">
+                    (you have competed in {result.competed_countries})
+                  </span>
+                )}
+              </label>
+            ) : result ? (
+              <span className="text-sm text-gray-500">
+                Log in with an account that has a WCA ID to find countries you have not competed in.
+              </span>
+            ) : (
+              <span />
+            )}
+          </div>
           {hasFilters && (
             <button
               type="button"
@@ -540,6 +558,11 @@ export default function UpcomingCompetitionsPage() {
                       >
                         {competition.name}
                       </a>
+                      {competition.my_registration && (
+                        <span className="ml-2 whitespace-nowrap rounded bg-blue-100 px-1.5 py-0.5 text-xs font-medium text-blue-800">
+                          {MY_REGISTRATION_LABELS[competition.my_registration]}
+                        </span>
+                      )}
                       {competition.championships.length > 0 && (
                         <div className="mt-1 flex flex-wrap gap-1">
                           {competition.championships.map((championship) => (

@@ -77,6 +77,7 @@ test("parses an empty query into no filters", () => {
     sort: "date",
     duration: "any",
     weekend: false,
+    registered: "all",
   });
 });
 
@@ -108,6 +109,7 @@ test("rejects malformed filters", () => {
     { near: "52,21", sort: "name" },
     { duration: "two" },
     { weekend: "true" },
+    { registered: "yes" },
   ]) {
     assert.throws(() => parse(query), UpcomingCompetitionsInputError, JSON.stringify(query));
   }
@@ -251,6 +253,29 @@ test("filters by number of days and by weekend", () => {
   assert.deepEqual(filter(competitions, { weekend: "1", duration: "multi" }), ["Weekend"]);
 });
 
+test("marks, keeps only or hides the viewer's registrations", () => {
+  const competitions = [
+    competition({ id: "Going" }),
+    competition({ id: "Waiting" }),
+    competition({ id: "Free" }),
+  ];
+  const mine = new Map([["Going", "accepted"], ["Waiting", "waiting_list"]]);
+  const run = (query, myRegistrations) =>
+    filterUpcomingCompetitions(competitions, parse(query), {
+      now: NOW,
+      regionKind: "world",
+      competedCountries: null,
+      myRegistrations,
+    });
+  assert.deepEqual(
+    run({}, mine).map((c) => [c.id, c.my_registration]),
+    [["Going", "accepted"], ["Waiting", "waiting_list"], ["Free", null]],
+  );
+  assert.deepEqual(run({ registered: "only" }, mine).map((c) => c.id), ["Going", "Waiting"]);
+  assert.deepEqual(run({ registered: "hide" }, mine).map((c) => c.id), ["Free"]);
+  assert.ok(run({}, null).every((c) => c.my_registration === null), "no account, nothing marked");
+});
+
 const socket = process.env.TEST_DB_SOCKET;
 let admin, pool;
 const database = `wca_upcoming_test_${process.pid}`;
@@ -297,7 +322,8 @@ before(async () => {
     // Small fills its two places: one registration is pending, one deleted, one a guest.
     `INSERT INTO registrations (competition_id,user_id,competing_status,is_competing,deleted_at) VALUES
        ('Small',1,'accepted',1,NULL),('Small',2,'accepted',1,NULL),('Small',3,'pending',1,NULL),
-       ('Small',4,'accepted',1,'2026-02-01'),('Small',5,'accepted',0,NULL),('Euro',1,'accepted',1,NULL)`,
+       ('Small',4,'accepted',1,'2026-02-01'),('Small',5,'accepted',0,NULL),('Euro',1,'accepted',1,NULL),
+       ('Euro',9,'pending',1,NULL),('Small',9,'cancelled',1,NULL),('Past2025',9,'accepted',1,NULL)`,
     "INSERT INTO championships (competition_id,championship_type) VALUES ('Euro','_Europe'),('Euro','ES'),('Euro','greater_china')",
     "INSERT INTO results (competition_id,person_id) VALUES ('Past2025','2020ADAA01')",
   ]) {
@@ -350,16 +376,24 @@ test("the service filters, and needs a WCA ID for countries not competed in", { 
   assert.ok(!options.regions.some((r) => r.id === "XE"), "a multi-country region is not a country to pick");
   assert.deepEqual(options.events.map((e) => e.id), ["333", "444", "333bf"]);
 
-  const all = await service.get({}, null);
+  const all = await service.get({}, { wcaId: null, userId: null });
   assert.equal(all.total, 4);
   assert.equal(all.competitions.find((c) => c.id === "Small").registration_status, "full");
   assert.equal(all.competitions.find((c) => c.id === "Euro").registration_status, "open");
   assert.equal(all.competitions.find((c) => c.id === "Today").registration_status, "closed");
 
-  const fresh = await service.get({ new_countries: "1" }, "2020ADAA01");
+  const fresh = await service.get({ new_countries: "1" }, { wcaId: "2020ADAA01", userId: 1 });
   assert.deepEqual(fresh.competitions.map((c) => c.id), ["Today", "Euro"]);
   assert.equal(fresh.competed_countries, 1);
 
-  await assert.rejects(service.get({ new_countries: "1" }, null), UpcomingCompetitionsInputError);
-  await assert.rejects(service.get({ region: "Atlantis" }, null), UpcomingCompetitionsInputError);
+  await assert.rejects(service.get({ new_countries: "1" }, { wcaId: null, userId: null }), UpcomingCompetitionsInputError);
+  // User 9 is pending at Euro; the cancelled registration and the finished competition do not count.
+  const mine = await service.get({ registered: "only" }, { wcaId: null, userId: 9 });
+  assert.deepEqual(mine.competitions.map((c) => [c.id, c.my_registration]), [["Euro", "pending"]]);
+  assert.equal(mine.can_filter_registrations, true);
+  const others = await service.get({ registered: "hide" }, { wcaId: null, userId: 1 });
+  assert.deepEqual(others.competitions.map((c) => c.id), ["Today", "Multi"]);
+  await assert.rejects(service.get({ registered: "only" }, { wcaId: null, userId: null }), UpcomingCompetitionsInputError);
+
+  await assert.rejects(service.get({ region: "Atlantis" }, { wcaId: null, userId: null }), UpcomingCompetitionsInputError);
 });

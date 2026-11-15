@@ -460,10 +460,11 @@ app.get(
 app.get("/api/upcoming-competitions", ensureAuthenticated, async (req: Request, res: Response) => {
   try {
     res.json(
-      await upcomingCompetitionsService.get(
-        req.query as Record<string, unknown>,
-        await viewerWcaId(req)
-      )
+      await upcomingCompetitionsService.get(req.query as Record<string, unknown>, {
+        wcaId: await viewerWcaId(req),
+        // The service token has no WCA account behind it.
+        userId: Number.isInteger((req as any).user?.wcaUserId) ? (req as any).user.wcaUserId : null,
+      })
     );
   } catch (err: unknown) {
     if (err instanceof UpcomingCompetitionsInputError) {
