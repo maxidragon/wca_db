@@ -22,6 +22,8 @@ Tools for querying and exploring the WCA developer database export: a SQL consol
 
 ### Competitions
 
+**Upcoming Competitions** (`/upcoming-competitions`): every announced competition that has not ended yet, as a list or on an OpenStreetMap map. Besides region, dates, events and a name search, it filters by championships (include, exclude or only), competitor limit and registration status, and for a logged-in competitor, by countries they have not competed in. [Details](docs/upcoming-competitions.md)
+
 **Achievements** (`/achievements`): milestones reached at a competition. These are competitors reaching their 100th, 150th, … competition, Delegates reaching their 100th, … delegated competition, competitors crossing successful-attempt milestones, and pairs reaching 100, 150 or 200 competitions together. For a competition that has not finished yet, it uses accepted registrations to show who is likely to reach a milestone. [Details](docs/achievements.md)
 
 **Qualifications** (`/qualifications`): for a competition with qualification requirements, everyone who meets them, checked the way the WCA checks them at registration. There is one list per event and one list of unique competitors. Custom mode takes requirements you set yourself. Lists can be filtered by region and by who has competed recently, and saved as views. [Details](docs/qualifications.md)
