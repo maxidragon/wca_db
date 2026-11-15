@@ -37,6 +37,10 @@ const FILTER_KEYS = [
   "registered",
 ];
 
+// "1" is the old "Weekend only" checkbox, kept so that shared links still work.
+const weekendMode = (value: string | null) =>
+  value === "1" ? "only" : value === "only" || value === "includes" ? value : "any";
+
 // About 100 m: enough to measure distances, and a shared link does not pinpoint anyone's home.
 const roundCoordinate = (value: number) => Math.round(value * 1000) / 1000;
 const formatCentre = (near: string) =>
@@ -398,15 +402,17 @@ export default function UpcomingCompetitionsPage() {
               <option value="multi">Multi-day</option>
             </select>
           </label>
-          <label className="flex items-center gap-2 self-end pb-2 text-sm font-medium text-gray-700">
-            <input
-              type="checkbox"
-              checked={searchParams.get("weekend") === "1"}
-              onChange={(e) => update("weekend", e.target.checked ? "1" : "")}
-            />
-            <span>
-              Weekend only <span className="font-normal text-gray-500">(Sat–Sun)</span>
-            </span>
+          <label className="text-sm font-medium text-gray-700">
+            Weekend
+            <select
+              className={`${inputClass} mt-1`}
+              value={weekendMode(searchParams.get("weekend"))}
+              onChange={(e) => update("weekend", e.target.value === "any" ? "" : e.target.value)}
+            >
+              <option value="any">Any days</option>
+              <option value="only">Only on a weekend (Sat–Sun)</option>
+              <option value="includes">Includes a weekend day</option>
+            </select>
           </label>
         </div>
 

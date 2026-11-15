@@ -7,6 +7,9 @@ export type RegistrationStatus = (typeof REGISTRATION_STATUSES)[number];
 
 export const DURATIONS = ["any", "single", "multi"] as const;
 export type Duration = (typeof DURATIONS)[number];
+/** `only`: every day is a Saturday or a Sunday. `includes`: at least one day is. */
+export const WEEKEND_MODES = ["any", "only", "includes"] as const;
+export type WeekendMode = (typeof WEEKEND_MODES)[number];
 
 export const REGISTERED_MODES = ["all", "only", "hide"] as const;
 export type RegisteredMode = (typeof REGISTERED_MODES)[number];
@@ -69,7 +72,7 @@ export interface UpcomingCompetitionsFilters {
   radius_km: number | null;
   sort: Sort;
   duration: Duration;
-  weekend: boolean;
+  weekend: WeekendMode;
   registered: RegisteredMode;
 }
 
@@ -191,9 +194,13 @@ export function parseUpcomingCompetitionsFilters(
   if (!DURATIONS.includes(duration)) {
     throw new UpcomingCompetitionsInputError("duration must be one of any, single, multi");
   }
-  const weekend = scalar(query, "weekend");
-  if (weekend !== "" && weekend !== "0" && weekend !== "1") {
-    throw new UpcomingCompetitionsInputError("weekend must be 0 or 1");
+  // 0 and 1 are the values of the old checkbox, kept so that shared links still work.
+  const weekendParam = scalar(query, "weekend");
+  const weekend = (
+    weekendParam === "" || weekendParam === "0" ? "any" : weekendParam === "1" ? "only" : weekendParam
+  ) as WeekendMode;
+  if (!WEEKEND_MODES.includes(weekend)) {
+    throw new UpcomingCompetitionsInputError("weekend must be one of any, only, includes");
   }
 
   const registered = (scalar(query, "registered") || "all") as RegisteredMode;
@@ -216,7 +223,7 @@ export function parseUpcomingCompetitionsFilters(
     radius_km,
     sort,
     duration,
-    weekend: weekend === "1",
+    weekend,
     registered,
   };
 }
@@ -224,13 +231,25 @@ export function parseUpcomingCompetitionsFilters(
 const DAY_MS = 24 * 60 * 60 * 1000;
 const dayNumber = (date: string) => Date.parse(`${date}T00:00:00Z`) / DAY_MS;
 
+const isWeekendDay = (day: number) => {
+  const weekday = new Date(day * DAY_MS).getUTCDay();
+  return weekday === 0 || weekday === 6;
+};
+
 /** Whether every day from start to end is a Saturday or a Sunday. */
 export function heldOnWeekend(start: string, end: string): boolean {
   for (let day = dayNumber(start); day <= dayNumber(end); day++) {
-    const weekday = new Date(day * DAY_MS).getUTCDay();
-    if (weekday !== 0 && weekday !== 6) return false;
+    if (!isWeekendDay(day)) return false;
   }
   return true;
+}
+
+/** Whether at least one day from start to end is a Saturday or a Sunday. */
+export function includesWeekend(start: string, end: string): boolean {
+  for (let day = dayNumber(start); day <= dayNumber(end); day++) {
+    if (isWeekendDay(day)) return true;
+  }
+  return false;
 }
 
 const EARTH_RADIUS_KM = 6371;
@@ -307,7 +326,8 @@ export function filterUpcomingCompetitions(
       if (filters.from && c.start_date < filters.from) return false;
       if (filters.duration === "single" && c.end_date !== c.start_date) return false;
       if (filters.duration === "multi" && c.end_date === c.start_date) return false;
-      if (filters.weekend && !heldOnWeekend(c.start_date, c.end_date)) return false;
+      if (filters.weekend === "only" && !heldOnWeekend(c.start_date, c.end_date)) return false;
+      if (filters.weekend === "includes" && !includesWeekend(c.start_date, c.end_date)) return false;
       if (filters.to && c.start_date > filters.to) return false;
       if (filters.events.some((id) => !c.events.includes(id))) return false;
       if (filters.championships === "exclude" && c.championships.length > 0) return false;
