@@ -4,7 +4,7 @@ The **Achievements** navigation tab (`/achievements`) takes a competition, found
 
 - **Competitions attended:** competitors attending their 100th, 150th, 200th, … up to 400th competition.
 - **Competitions delegated:** Delegates of this competition delegating their 100th, 150th, … up to 400th.
-- **Successful attempts:** competitors whose career count of successful attempts crosses 1,000, 2,137, 5,000, 10,000, 15,000, 20,000, 21,370 or 25,000 during the competition.
+- **Successful attempts:** competitors whose career count of successful attempts crosses 1,000, 2,137, 5,000, 10,000, 15,000, 20,000 or 21,370, or any multiple of 1,000 above 20,000 (21,000, 22,000, …), during the competition. One competition can cross several, and each is listed.
 - **Competitions together:** pairs of competitors reaching their 100th, 150th or 200th shared competition.
 
 The competition is kept in the URL as `competition_id`, so a page can be linked.
