@@ -34,6 +34,7 @@ interface AchievementsResult {
   competition: Competition;
   projected: boolean;
   roster_size: number;
+  accepted_registrations: number | null;
   competition_milestones: PersonMilestone[];
   delegate_milestones: PersonMilestone[];
   successful_attempt_milestones: AttemptMilestone[];
@@ -272,7 +273,9 @@ export default function AchievementsPage() {
                   {result.competition.name}
                 </a>
                 <p className="mt-1 text-sm text-slate-300">
-                  {formatDate(result.competition.start_date)} · {result.roster_size.toLocaleString()} {result.projected ? "accepted registrations" : "competitors"}
+                  {formatDate(result.competition.start_date)} · {result.projected && result.accepted_registrations !== null
+                    ? `${result.accepted_registrations.toLocaleString()} accepted registrations`
+                    : `${result.roster_size.toLocaleString()} competitors`}
                 </p>
               </div>
               <span className={`rounded-full px-3 py-1 text-sm font-medium ${result.projected ? "bg-amber-400/20 text-amber-200" : "bg-emerald-400/20 text-emerald-200"}`}>

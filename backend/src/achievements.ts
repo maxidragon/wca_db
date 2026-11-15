@@ -173,6 +173,22 @@ export async function getCompetitionAchievements(
     [competition.id, ...sequenceParams]
   );
 
+  // The roster leaves out newcomers, who have no history to reach a milestone with,
+  // so the page needs a separate count of everyone accepted.
+  let acceptedRegistrations: number | null = null;
+  if (projected) {
+    const [[acceptedRow]] = await pool.query<RowDataPacket[]>(
+      `SELECT COUNT(*) AS accepted
+       FROM registrations reg
+       WHERE reg.competition_id = ?
+         AND reg.competing_status = 'accepted'
+         AND reg.is_competing = 1
+         AND reg.deleted_at IS NULL`,
+      [competition.id]
+    );
+    acceptedRegistrations = Number(acceptedRow.accepted);
+  }
+
   const competitionMilestones = competitionCountRows
     .filter((row) => COMPETITION_MILESTONES.includes(Number(row.competition_count)))
     .map((row) => ({
@@ -371,6 +387,7 @@ export async function getCompetitionAchievements(
     competition,
     projected,
     roster_size: competitionCountRows.length,
+    accepted_registrations: acceptedRegistrations,
     competition_milestones: competitionMilestones,
     delegate_milestones: delegateMilestones,
     successful_attempt_milestones: successfulAttemptMilestones,
