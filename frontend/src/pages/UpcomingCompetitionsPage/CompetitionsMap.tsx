@@ -1,4 +1,5 @@
-import { Fragment, useEffect, useMemo } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
+import { VscLock, VscUnlock } from "react-icons/vsc";
 import { Circle, CircleMarker, MapContainer, Popup, TileLayer, useMap, useMapEvents } from "react-leaflet";
 import { latLngBounds } from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -15,6 +16,26 @@ import {
 } from "./types";
 
 type Located = UpcomingCompetition & { latitude: number; longitude: number };
+
+const LOCK_STORAGE_KEY = "upcomingCompetitionsPointLocked";
+
+function readLocked(): boolean {
+  try {
+    return localStorage.getItem(LOCK_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+// Kept in this browser rather than the URL: it is how someone uses the map, not what it shows.
+function storeLocked(locked: boolean) {
+  try {
+    if (locked) localStorage.setItem(LOCK_STORAGE_KEY, "1");
+    else localStorage.removeItem(LOCK_STORAGE_KEY);
+  } catch {
+    // Storage can be unavailable (private mode, quota); the lock then lasts until the page closes.
+  }
+}
 
 // Zooms to the competitions shown whenever the filters change which they are.
 function FitToCompetitions({ competitions }: { competitions: Located[] }) {
@@ -62,18 +83,42 @@ export default function CompetitionsMap({
     [competitions],
   );
   const missing = competitions.length - located.length;
+  const [locked, setLocked] = useState(readLocked);
+  const toggleLocked = () => {
+    storeLocked(!locked);
+    setLocked(!locked);
+  };
+  // The lock only keeps a point that is there: without one, a click still picks the first.
+  const pointLocked = locked && centre !== null;
 
   return (
     <div>
       {/* isolate keeps Leaflet's high z-indexes under the sticky navbar. */}
-      <div className="isolate h-[70vh] min-h-96 overflow-hidden rounded-xl border border-gray-200 shadow-sm">
+      <div className="relative isolate h-[70vh] min-h-96 overflow-hidden rounded-xl border border-gray-200 shadow-sm">
+        {/* Outside the map container, so clicking it never reaches the map as a pick. */}
+        {centre && (
+          <button
+            type="button"
+            aria-pressed={locked}
+            onClick={toggleLocked}
+            title={locked ? "Let a click on the map move the point" : "Keep the point when the map is clicked"}
+            className={`absolute top-2.5 right-2.5 z-[1000] flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium shadow-sm ${
+              locked
+                ? "border-red-300 bg-red-50 text-red-700 hover:bg-red-100"
+                : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+            }`}
+          >
+            {locked ? <VscLock aria-hidden /> : <VscUnlock aria-hidden />}
+            {locked ? "Point locked" : "Lock point"}
+          </button>
+        )}
         <MapContainer center={[30, 10]} zoom={2} preferCanvas className="h-full w-full" worldCopyJump>
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
           <FitToCompetitions competitions={located} />
-          <PickOnClick onPick={onPick} />
+          {!pointLocked && <PickOnClick onPick={onPick} />}
           {centre && radiusKm && (
             <Circle
               center={centre}
@@ -176,7 +221,11 @@ export default function CompetitionsMap({
           <span className="inline-block h-3.5 w-3.5 rounded-full border-[3px] bg-white" style={{ borderColor: REGISTERED_COLOR }} />
           Registered
         </span>
-        <span className="text-gray-500">Click the map to measure distances from that point.</span>
+        <span className="text-gray-500">
+          {pointLocked
+            ? "The point is locked: unlock it to pick another by clicking the map."
+            : "Click the map to measure distances from that point."}
+        </span>
       </div>
       {missing > 0 && (
         <p className="mt-2 text-xs text-gray-500">
