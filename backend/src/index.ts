@@ -29,6 +29,10 @@ import {
   StatisticsInputError,
   statisticsEntriesReady,
 } from "./statistics";
+import {
+  createUpcomingCompetitionsService,
+  UpcomingCompetitionsInputError,
+} from "./upcoming_competitions";
 
 const PORT = process.env.PORT || 3001;
 
@@ -64,6 +68,7 @@ const QUERY_TOOL_UNAVAILABLE = "The Query Tool is temporarily unavailable.";
 
 const statisticsService = createStatisticsService(pool);
 const qualificationsService = createQualificationsService(pool);
+const upcomingCompetitionsService = createUpcomingCompetitionsService(pool);
 
 app.get("/api/statistics/options", ensureAuthenticated, async (_req: Request, res: Response) => {
   try {
@@ -436,6 +441,36 @@ app.get("/api/achievements", ensureAuthenticated, async (req: Request, res: Resp
     res.json(achievements);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+app.get(
+  "/api/upcoming-competitions/options",
+  ensureAuthenticated,
+  async (_req: Request, res: Response) => {
+    try {
+      res.json(await upcomingCompetitionsService.options());
+    } catch (err: unknown) {
+      console.error("Upcoming competitions options failed", err);
+      res.status(500).json({ error: "Could not load the filters" });
+    }
+  }
+);
+
+app.get("/api/upcoming-competitions", ensureAuthenticated, async (req: Request, res: Response) => {
+  try {
+    res.json(
+      await upcomingCompetitionsService.get(
+        req.query as Record<string, unknown>,
+        await viewerWcaId(req)
+      )
+    );
+  } catch (err: unknown) {
+    if (err instanceof UpcomingCompetitionsInputError) {
+      return res.status(400).json({ error: err.message });
+    }
+    console.error("Upcoming competitions query failed", err);
+    res.status(500).json({ error: "Could not load the upcoming competitions" });
   }
 });
 

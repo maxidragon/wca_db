@@ -30,6 +30,7 @@ const NAV_ENTRIES: (NavItem | NavGroup)[] = [
   {
     label: "Competitions",
     items: [
+      { label: "Upcoming", to: "/upcoming-competitions" },
       { label: "Achievements", to: "/achievements" },
       { label: "Qualifications", to: "/qualifications" },
     ],

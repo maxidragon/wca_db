@@ -11,12 +11,13 @@ Notes for working on this repository. The user-facing overview is in [README.md]
 - [docs/best-ever-ranks.md](docs/best-ever-ranks.md)
 - [docs/achievements.md](docs/achievements.md)
 - [docs/qualifications.md](docs/qualifications.md)
+- [docs/upcoming-competitions.md](docs/upcoming-competitions.md)
 
 Read the relevant doc before changing a feature, and update it in the same change when behaviour, an endpoint or a performance trade-off changes. A new page gets its own doc and a short paragraph in the README; the README stays an overview.
 
 ## Layout
 
-- `backend/`: Express + TypeScript on MariaDB. `src/index.ts` holds the routes; each feature has its own module (`query_tool.ts`, `statistics.ts`, `person.ts`, `nemeses.ts`, `qualifications.ts`, `relations.ts`, `achievements.ts`, `best_ever_ranks.ts`). Tests are in `backend/test/*.test.cjs` and run against the compiled `dist/`.
+- `backend/`: Express + TypeScript on MariaDB. `src/index.ts` holds the routes; each feature has its own module (`query_tool.ts`, `statistics.ts`, `person.ts`, `nemeses.ts`, `qualifications.ts`, `relations.ts`, `achievements.ts`, `best_ever_ranks.ts`, `upcoming_competitions.ts`). Tests are in `backend/test/*.test.cjs` and run against the compiled `dist/`.
 - `frontend/`: React + Vite + Tailwind, with one directory per page in `src/pages/`. `frontend/README.md` is the unmodified Vite template.
 - `backend/*.sh` and `backend/*.sql`: import and derived-table scripts, and `create_query_user.sh` / `query_user.sql` for the Query Tool's user. See below.
 
