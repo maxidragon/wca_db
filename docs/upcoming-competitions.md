@@ -23,7 +23,7 @@ The status is worked out the way the WCA website does it, in its order: before `
 
 ## Map
 
-The map uses Leaflet with OpenStreetMap tiles, loaded only when the map is opened. A marker's colour is its registration status, and a championship gets a dark ring. It zooms to the competitions shown whenever the filters change them. Clicking the map, anywhere but a marker, sets the point distances are measured from; the point and the radius are drawn on the map, and the map stays when nothing matches, so another point can be picked. A competition whose venue has no coordinates (stored as 0, 0) is only in the list, and the map says how many.
+The map uses Leaflet with OpenStreetMap tiles, loaded only when the map is opened. A marker's colour is its registration status, and a championship gets a dark ring. It zooms to the competitions shown whenever the filters change them. Clicking the map, anywhere but a marker, sets the point distances are measured from; the point and the radius are drawn on the map, and the map stays when nothing matches, so another point can be picked. Once a point is set, **Lock point** in the map's corner stops clicks from moving it, so a missed click on a marker does not lose the point; **Use my location** and **Clear** still change it. The lock is remembered in the browser (`localStorage`), not in the URL. A competition whose venue has no coordinates (stored as 0, 0) is only in the list, and the map says how many.
 
 ## API
 
