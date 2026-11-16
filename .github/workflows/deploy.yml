@@ -1,82 +1,292 @@
+# Deploy to production from every push to main.
+#
+# The job runs on a self-hosted runner on the production host itself, so nothing is copied
+# over the network and no SSH key is needed: it builds in its workspace and installs the
+# result into APP_DIR. Where that is, and which service runs the API on which port, come from
+# the `production` environment's secrets, so this public repository's run logs show them
+# masked; the runner comes from a repository variable, because runs-on cannot read a
+# secret. The job refuses to run without any of them rather than guess.
+#
+# Layout it maintains under $APP_DIR:
+#
+#   releases/<sha>/        a copy of the built workspace
+#   ├── backend/dist       what the service runs
+#   └── frontend/dist      what the web server serves
+#   current  -> releases/<sha>
+#   previous -> the release before it, so a tab opened before a deploy can still load
+#               lazy chunks the new release no longer has
+#   .previous              the same path as text, for the rollback
+#   .env                   written from the environment's secrets on each deploy
+#
+# `current` is a symlink swapped in one operation, so neither the web server nor the service
+# ever sees a half-copied release, and a failed health check swaps it back.
+#
+# The service manager has to run the API from $APP_DIR/current/backend with $APP_DIR/.env
+# as its environment, and the deploy user may restart it with sudo. The nightly import
+# (backend/update_database.sh) is scheduled outside this repository.
+
 name: Deploy
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [main]
+    # A docs-only push changes nothing that is built or served.
+    paths-ignore: ["docs/**", "**/*.md"]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  build:
-    runs-on: self-hosted
-    strategy:
-      matrix:
-        node-version: [19.x]
+  deploy:
+    # Only this repository's own main deploys. A fork carries this file too, and its copy
+    # would otherwise queue forever waiting for a runner it does not have; a run dispatched
+    # from another branch would ship that branch.
+    if: github.repository == 'maxidragon/wca_db' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, "${{ vars.DEPLOY_RUNNER_LABEL_PRODUCTION }}"]
+    environment: production
+    # Never two deploys at once, and never one cancelled half way: an interrupted deploy can
+    # leave the symlink swapped and the service not restarted.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    # The derived tables built after the swap take up to half an hour when missing.
+    timeout-minutes: 90
+    env:
+      APP_DIR: ${{ secrets.APP_DIR }}
+      SERVICE: ${{ secrets.SERVICE }}
+      API_PORT: ${{ secrets.API_PORT }}
 
     steps:
-    - uses: actions/checkout@v4
-    - name: Use Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ matrix.node-version }}
-    - name: Install backend dependencies
-      run: npm install
-      working-directory: ./backend 
-    # Both workflows that restart the backend write the same .env; keep this env list in step with
-    # update_database.yml and with SETTINGS in .github/scripts/write_backend_env.sh.
-    - name: Create .env
-      run: .github/scripts/write_backend_env.sh
-      env:
-        PORT: ${{ secrets.PORT }}
-        FRONTEND_ORIGIN: ${{ secrets.FRONTEND_ORIGIN }}
-        JWT_SECRET: ${{ secrets.JWT_SECRET }}
-        SERVICE_TOKEN: ${{ secrets.SERVICE_TOKEN }}
-        DB_HOST: ${{ secrets.DB_HOST }}
-        DB_USER: ${{ secrets.DB_USER }}
-        DB_PASS: ${{ secrets.DB_PASS }}
-        DB_NAME: ${{ secrets.DB_NAME }}
-        QUERY_DB_USER: ${{ secrets.QUERY_DB_USER }}
-        QUERY_DB_PASS: ${{ secrets.QUERY_DB_PASS }}
-        WCA_CLIENT_ID: ${{ secrets.WCA_CLIENT_ID }}
-        WCA_CLIENT_SECRET: ${{ secrets.WCA_CLIENT_SECRET }}
-        STATISTICS_MEMORY_MB: ${{ secrets.STATISTICS_MEMORY_MB }}
-    - name: Build project
-      run: npm run build
-      working-directory: ./backend
-    - name: Install frontend dependencies
-      run: npm install
-      working-directory: ./frontend
-    - name: Build frontend
-      run: npm run build
-      working-directory: ./frontend
-    # Deploys do not import, so a database last imported before statistics_entries existed
-    # would serve 503s until the nightly import. Builds it once; a no-op after that.
-    - name: Ensure statistics entries exist
-      run: ./compute_statistics_entries.sh --if-missing
-      working-directory: ./backend
-    # The nemeses read the rank tables by event and rank. An import builds those indexes;
-    # this adds them to a database imported before they existed, in seconds, once.
-    - name: Ensure rank indexes exist
-      run: |
-        set -a; . ./.env; set +a
-        mariadb --user="${DB_USER:-root}" --password="${DB_PASS:-}" "${DB_NAME:-wca}" < rank_indexes.sql
-      working-directory: ./backend
-    # The qualification lists read results by event and result. An import builds those
-    # indexes; this adds them to a database imported before they existed, once.
-    - name: Ensure qualification indexes exist
-      run: |
-        set -a; . ./.env; set +a
-        mariadb --user="${DB_USER:-root}" --password="${DB_PASS:-}" "${DB_NAME:-wca}" < qualification_indexes.sql
-      working-directory: ./backend
-    - name: Restart service
-      run: pm2 restart wca-db-backend -s || pm2 start dist/index.js --name wca-db-backend -s
-      working-directory: ./backend
-    # Deploys do not import. A database whose linkings or best ever ranks are missing gets
-    # them here rather than at the next nightly import; a single query when they exist. After
-    # the restart, because building them takes up to half an hour and the code does not
-    # depend on them.
-    - name: Ensure linkings exist
-      run: ./compute_linkings.sh --if-missing
-      working-directory: ./backend
-    - name: Ensure best ever ranks exist
-      run: ./compute_best_ever_ranks.sh --if-missing
-      working-directory: ./backend
+      # Before anything writes. No defaults: any value written here would fit one host only.
+      - name: Check the deploy target is set
+        env:
+          RUNNER_LABEL: ${{ vars.DEPLOY_RUNNER_LABEL_PRODUCTION }}
+        run: |
+          set -euo pipefail
+          failed=0
+          for name in APP_DIR SERVICE API_PORT; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::The $name secret is not set for the production environment."
+              failed=1
+            fi
+          done
+          if [ -z "${RUNNER_LABEL:-}" ]; then
+            echo "::error::The DEPLOY_RUNNER_LABEL_PRODUCTION repository variable is not set."
+            failed=1
+          fi
+          [ "$failed" = 0 ] || exit 1
+          case "$APP_DIR" in
+            /*) ;;
+            *) echo "::error::APP_DIR must be an absolute path."; exit 1 ;;
+          esac
+          case "$API_PORT" in
+            *[!0-9]*) echo "::error::API_PORT must be a port number."; exit 1 ;;
+          esac
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Install backend dependencies
+        run: npm ci
+        working-directory: ./backend
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: ./frontend
+
+      # One file outside every release, read by the service manager. A rollback swaps the
+      # code and leaves the configuration as it is. Keep this list in step with SETTINGS in
+      # the script.
+      - name: Write .env
+        run: .github/scripts/write_backend_env.sh "$APP_DIR/.env"
+        env:
+          PORT: ${{ secrets.API_PORT }}
+          FRONTEND_ORIGIN: ${{ secrets.FRONTEND_ORIGIN }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          SERVICE_TOKEN: ${{ secrets.SERVICE_TOKEN }}
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASS: ${{ secrets.DB_PASS }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+          QUERY_DB_USER: ${{ secrets.QUERY_DB_USER }}
+          QUERY_DB_PASS: ${{ secrets.QUERY_DB_PASS }}
+          WCA_CLIENT_ID: ${{ secrets.WCA_CLIENT_ID }}
+          WCA_CLIENT_SECRET: ${{ secrets.WCA_CLIENT_SECRET }}
+          STATISTICS_MEMORY_MB: ${{ secrets.STATISTICS_MEMORY_MB }}
+          IMPORT_HEALTHCHECK_URL: ${{ secrets.IMPORT_HEALTHCHECK_URL }}
+
+      - name: Build backend
+        run: npm run build
+        working-directory: ./backend
+
+      - name: Build frontend
+        run: npm run build
+        working-directory: ./frontend
+
+      # The service runs the system's /usr/bin/node, not the one setup-node put on this job's
+      # PATH, so an old system Node would only show once the service failed to start.
+      - name: Check system Node version
+        run: |
+          set -euo pipefail
+          if [ ! -x /usr/bin/node ]; then
+            echo "::error::/usr/bin/node not found; install Node 22 system-wide."
+            exit 1
+          fi
+          version="$(/usr/bin/node --version)"
+          major="${version#v}"; major="${major%%.*}"
+          echo "system node: $version (build toolchain: $(node --version))"
+          if [ "$major" -lt 22 ]; then
+            echo "::error::/usr/bin/node is $version; the backend needs 22 or newer."
+            exit 1
+          fi
+
+      # Deploys do not import, so a database last imported before statistics_entries existed
+      # would serve 503s until the next import. Builds it once; a no-op after that. Before the
+      # swap, so the new release never starts without it.
+      - name: Ensure statistics entries exist
+        run: |
+          set -a; . "$APP_DIR/.env"; set +a
+          ./compute_statistics_entries.sh --if-missing
+        working-directory: ./backend
+
+      # The nemeses read the rank tables by event and rank. An import builds those indexes;
+      # this adds them to a database imported before they existed, in seconds, once.
+      - name: Ensure rank indexes exist
+        run: |
+          set -a; . "$APP_DIR/.env"; set +a
+          mariadb --user="${DB_USER:-root}" --password="${DB_PASS:-}" "${DB_NAME:-wca}" < rank_indexes.sql
+        working-directory: ./backend
+
+      # The qualification lists read results by event and result. An import builds those
+      # indexes; this adds them to a database imported before they existed, once.
+      - name: Ensure qualification indexes exist
+        run: |
+          set -a; . "$APP_DIR/.env"; set +a
+          mariadb --user="${DB_USER:-root}" --password="${DB_PASS:-}" "${DB_NAME:-wca}" < qualification_indexes.sql
+        working-directory: ./backend
+
+      # --link-dest hardlinks every file identical to the current release, so a release costs
+      # only what changed. A rerun of the commit already live keeps that release as it is:
+      # deleting it would pull it from under the running service.
+      - name: Assemble release
+        run: |
+          set -euo pipefail
+          RELEASE="$APP_DIR/releases/$(git rev-parse HEAD)"
+          echo "RELEASE=$RELEASE" >> "$GITHUB_ENV"
+          mkdir -p "$APP_DIR/releases"
+          CURRENT=""
+          if [ -L "$APP_DIR/current" ]; then
+            CURRENT="$(readlink -f "$APP_DIR/current")"
+          fi
+          if [ "$CURRENT" = "$RELEASE" ]; then
+            echo "$RELEASE is already the live release; restarting it as it is"
+            exit 0
+          fi
+          rm -rf "$RELEASE"
+          mkdir -p "$RELEASE"
+          LINK=()
+          if [ -n "$CURRENT" ]; then
+            LINK=(--link-dest="$CURRENT")
+          fi
+          rsync -a --delete \
+            --exclude '.git' \
+            --exclude 'backend/.env' \
+            --exclude '**/node_modules/.cache' \
+            "${LINK[@]}" \
+            ./ "$RELEASE/"
+          # rsync -a gave the release the workspace's own mtime; pruning sorts by when a
+          # release was made.
+          touch "$RELEASE"
+          echo "release apparent size: $(du -sh "$RELEASE" | cut -f1) (mostly hardlinks)"
+
+      - name: Activate release
+        run: |
+          set -euo pipefail
+          echo "ACTIVATED_AT=$(date +%s)" >> "$GITHUB_ENV"
+          OUTGOING=""
+          if [ -L "$APP_DIR/current" ]; then
+            OUTGOING="$(readlink -f "$APP_DIR/current")"
+          fi
+          # A rerun of the live release keeps `previous` on the one before it.
+          if [ -n "$OUTGOING" ] && [ "$OUTGOING" != "$RELEASE" ]; then
+            echo "$OUTGOING" > "$APP_DIR/.previous"
+            ln -sfn "$OUTGOING" "$APP_DIR/previous.new"
+            mv -Tf "$APP_DIR/previous.new" "$APP_DIR/previous"
+          fi
+          ln -sfn "$RELEASE" "$APP_DIR/current.new"
+          mv -Tf "$APP_DIR/current.new" "$APP_DIR/current"
+          sudo systemctl restart "$SERVICE"
+
+      # The service must be active too: with a wrong API_PORT the new process cannot bind,
+      # and the URL may be answered by something else. /api/metadata needs no login and
+      # reads the database, so it fails when the backend cannot reach it.
+      - name: Health check, roll back on failure
+        run: |
+          set -euo pipefail
+          HEALTH_URL="http://127.0.0.1:${API_PORT}/api/metadata"
+          for i in $(seq 1 30); do
+            if curl -sf --max-time 3 -o /dev/null "$HEALTH_URL" \
+              && systemctl is-active --quiet "$SERVICE"; then
+              echo "healthy after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+
+          echo "::error::The backend did not become healthy; rolling back"
+          # Since activation only: this repository's run logs are public, and the old
+          # process's request logs are not theirs to read.
+          sudo journalctl -u "$SERVICE" --since "@$ACTIVATED_AT" --no-pager -o cat || true
+          if [ -s "$APP_DIR/.previous" ] && [ "$(cat "$APP_DIR/.previous")" != "$RELEASE" ]; then
+            ln -sfn "$(cat "$APP_DIR/.previous")" "$APP_DIR/current.new"
+            mv -Tf "$APP_DIR/current.new" "$APP_DIR/current"
+            sudo systemctl restart "$SERVICE"
+            echo "rolled back to $(cat "$APP_DIR/.previous")"
+          else
+            echo "::warning::No previous release recorded; nothing to roll back to"
+          fi
+          exit 1
+
+      # Deploys do not import. A database whose linkings or best ever ranks are missing gets
+      # them here rather than at the next import; a single query when they exist. After the
+      # swap, because building them takes up to half an hour and the code does not depend on
+      # them.
+      - name: Ensure linkings exist
+        run: |
+          set -a; . "$APP_DIR/.env"; set +a
+          ./compute_linkings.sh --if-missing
+        working-directory: ./backend
+
+      - name: Ensure best ever ranks exist
+        run: |
+          set -a; . "$APP_DIR/.env"; set +a
+          ./compute_best_ever_ranks.sh --if-missing
+        working-directory: ./backend
+
+      # Five newest, and never the live release or the one the web server falls back to.
+      - name: Prune old releases
+        run: |
+          set -euo pipefail
+          CURRENT="$(basename "$(readlink -f "$APP_DIR/current")")"
+          PREVIOUS=""
+          if [ -L "$APP_DIR/previous" ]; then
+            PREVIOUS="$(basename "$(readlink -f "$APP_DIR/previous")")"
+          fi
+          cd "$APP_DIR/releases"
+          # Release names are commit hashes, so ls's output is safe to read line by line.
+          # shellcheck disable=SC2012
+          ls -1t | tail -n +6 | while read -r release; do
+            if [ "$release" = "$CURRENT" ] || [ "$release" = "$PREVIOUS" ]; then
+              continue
+            fi
+            rm -rf -- "$release"
+            echo "pruned $release"
+          done

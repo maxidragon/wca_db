@@ -25,7 +25,9 @@ IMPORT_LOG_FILE_SIZE="${IMPORT_LOG_FILE_SIZE:-1073741824}"
 # Left alone by default; set it (e.g. 1073741824) if the box has memory going spare.
 IMPORT_BUFFER_POOL_SIZE="${IMPORT_BUFFER_POOL_SIZE:-}"
 
-TMP_DIR="$SCRIPT_DIR/../tmp"
+# Downloads and scratch files, a few GB. IMPORT_TMP_DIR moves them out of the checkout, for
+# a host that runs the import from a release directory it later deletes.
+TMP_DIR="${IMPORT_TMP_DIR:-$SCRIPT_DIR/../tmp}"
 ZIP_PATH="$TMP_DIR/wca-dump.zip"
 HEADER_PATH="$TMP_DIR/wca-dump.headers"
 RESULTS_ZIP_PATH="$TMP_DIR/wca-results.tsv.zip"

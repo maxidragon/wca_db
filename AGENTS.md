@@ -34,7 +34,7 @@ Read the relevant doc before changing a feature, and update it in the same chang
 
 `npm test` builds first. Without `TEST_DB_SOCKET`, only the filter-validation and cache-behaviour tests run; the database integration tests are skipped, and the person tests are integration tests throughout. With it, each test file creates a uniquely named fixture database on that socket as the local root user and drops only that database afterwards. The statistics tests exercise every statistic and filter combination, and check calculations and pagination. The tests never load `.env` or use its connection settings. Keep it that way: never point them at a server holding real data.
 
-CI (`.github/workflows/ci.yml`) runs the backend tests against a MariaDB installed on a GitHub-hosted runner, plus the frontend lint and build, on every pull request and every push to `main`. The deploy and nightly import workflows run on a self-hosted runner, the one that holds the imported export. CI deliberately does not use that runner.
+CI (`.github/workflows/ci.yml`) runs the backend tests against a MariaDB installed on a GitHub-hosted runner, plus the frontend lint and build, on every pull request and every push to `main`. The deploy runs on a self-hosted runner on the production host. CI deliberately does not use that runner.
 
 ## Data and derived tables
 
@@ -51,6 +51,14 @@ Derived data the features depend on:
 | `best_ever_ranks` | the import (needs `npm run build` first), or `compute_best_ever_ranks.sh [--if-missing] [database]`; deploy runs `--if-missing` | Best Ever Ranks | 503 |
 
 Every derived table is built in the staging database before the swap, so it matches the export it was computed from and is never missing from the live database. The swap is a single `RENAME` of every table, and the rebuild scripts build a `_new` table and rename it into place, so a manual rerun never empties a live table either. Keep new derived tables to the same pattern. Deploys do not import. A new derived table or index therefore needs an idempotent step in `.github/workflows/deploy.yml`, so a database imported before it existed still works. Follow the existing `--if-missing` pattern.
+
+## Deploys
+
+A push to `main` deploys to production (`.github/workflows/deploy.yml`), except one that touches only `docs/` or Markdown. The workflow reads where to deploy from the `production` environment's secrets (`APP_DIR`, `SERVICE`, `API_PORT`) and the runner from the `DEPLOY_RUNNER_LABEL_PRODUCTION` repository variable, and refuses to run without them. It builds, installs a new release beside the live one, switches to it, and switches back if the backend does not answer `/api/metadata` within 30 seconds.
+
+`backend/update_database.sh` is the import. It is run on a schedule outside this repository, and is safe to rerun: a failed run leaves the live database as it was.
+
+A new setting goes into the deploy's `Write .env` step and into `SETTINGS` in `.github/scripts/write_backend_env.sh`. Secrets belong to the `production` environment, not the repository.
 
 ## Query Tool security
 
