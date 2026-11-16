@@ -567,15 +567,10 @@ export interface PersonResult {
   average_pr: boolean;
 }
 
-interface PersonResultDetailRow extends RowDataPacket {
+interface PersonResultRowWithId extends RowDataPacket {
   id: number;
   competition_id: string;
-  competition_name: string;
-  start_date: string;
-  country_name: string;
   event_id: string;
-  event_name: string;
-  event_rank: number;
   round_type_id: string;
   pos: number;
   best: number;
@@ -584,9 +579,31 @@ interface PersonResultDetailRow extends RowDataPacket {
   average_record: string | null;
 }
 
+interface ResultCompetitionRow extends RowDataPacket {
+  id: string;
+  name: string;
+  start_date: string;
+  country_name: string;
+}
+
+interface EventRow extends RowDataPacket {
+  id: string;
+  name: string;
+  rank: number;
+}
+
 interface AttemptRow extends RowDataPacket {
   result_id: number;
   value: number;
+}
+
+/** A result with its competition and event attached, before personal records are marked. */
+interface NamedResult extends PersonResultRowWithId {
+  competition_name: string;
+  start_date: string;
+  country_name: string;
+  event_name: string;
+  event_rank: number;
 }
 
 /**
@@ -594,28 +611,25 @@ interface AttemptRow extends RowDataPacket {
  * final before the rounds leading to it. Personal records are marked walking the results
  * oldest first, so a round improving on an earlier round of the same competition is one.
  * Returns null for an unknown WCA ID.
+ *
+ * The results are read by person alone and names are attached afterwards: joining the
+ * competitions onto every result cost seconds for a competitor with thousands of them.
  */
 export async function getPersonResults(
   pool: Pool,
   wcaId: string,
 ): Promise<PersonResult[] | null> {
-  const [[[person]], [rows], [attempts]] = await Promise.all([
+  const [[[person]], [resultRows], [attempts], [eventRows]] = await Promise.all([
     pool.query<RowDataPacket[]>(
       "SELECT 1 FROM persons WHERE wca_id = ? AND sub_id = 1",
       [wcaId],
     ),
-    pool.query<PersonResultDetailRow[]>(
-      `SELECT r.id, r.competition_id, c.name AS competition_name,
-              DATE_FORMAT(c.start_date, '%Y-%m-%d') AS start_date,
-              co.name AS country_name, r.event_id, e.name AS event_name,
-              e.rank AS event_rank, r.round_type_id, r.pos, r.best, r.average,
-              r.regional_single_record AS single_record,
-              r.regional_average_record AS average_record
-       FROM results r
-       JOIN competitions c ON c.id = r.competition_id
-       JOIN countries co ON co.id = c.country_id
-       JOIN events e ON e.id = r.event_id
-       WHERE r.person_id = ?`,
+    pool.query<PersonResultRowWithId[]>(
+      `SELECT id, competition_id, event_id, round_type_id, pos, best, average,
+              regional_single_record AS single_record,
+              regional_average_record AS average_record
+       FROM results
+       WHERE person_id = ?`,
       [wcaId],
     ),
     pool.query<AttemptRow[]>(
@@ -626,8 +640,35 @@ export async function getPersonResults(
        ORDER BY a.result_id, a.attempt_number`,
       [wcaId],
     ),
+    pool.query<EventRow[]>("SELECT id, name, `rank` FROM events"),
   ]);
   if (!person) return null;
+
+  const competitionIds = [...new Set(resultRows.map((row) => row.competition_id))];
+  const [competitionRows] =
+    competitionIds.length === 0
+      ? [[] as ResultCompetitionRow[]]
+      : await pool.query<ResultCompetitionRow[]>(
+          `SELECT c.id, c.name, DATE_FORMAT(c.start_date, '%Y-%m-%d') AS start_date,
+                  co.name AS country_name
+           FROM competitions c
+           JOIN countries co ON co.id = c.country_id
+           WHERE c.id IN (?)`,
+          [competitionIds],
+        );
+  const competitions = new Map(competitionRows.map((row) => [row.id, row]));
+  const events = new Map(eventRows.map((row) => [row.id, row]));
+  const rows: NamedResult[] = resultRows.map((row) => {
+    const competition = competitions.get(row.competition_id)!;
+    const event = events.get(row.event_id)!;
+    return Object.assign(row, {
+      competition_name: competition.name,
+      start_date: competition.start_date,
+      country_name: competition.country_name,
+      event_name: event.name,
+      event_rank: Number(event.rank),
+    });
+  });
 
   const attemptsByResult = new Map<number, number[]>();
   for (const { result_id, value } of attempts) {
@@ -638,7 +679,7 @@ export async function getPersonResults(
 
   // Oldest first: by date, by ID within a day as the competitions are numbered, then the
   // rounds of each event in the order they ran.
-  const roundOrder = (row: PersonResultDetailRow) => ROUND_ORDER[row.round_type_id] ?? 0;
+  const roundOrder = (row: NamedResult) => ROUND_ORDER[row.round_type_id] ?? 0;
   const chronological = [...rows].sort(
     (a, b) =>
       a.start_date.localeCompare(b.start_date) ||
