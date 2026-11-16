@@ -80,3 +80,32 @@ export interface PersonProfile {
   countries: { country_id: string; country_name: string; competitions: number }[];
   years: { year: number; competitions: number }[];
 }
+
+export interface PersonResult {
+  competition_id: string;
+  competition_name: string;
+  start_date: string;
+  country_name: string;
+  event_id: string;
+  event_name: string;
+  event_rank: number;
+  round_type_id: string;
+  round_order: number;
+  pos: number;
+  best: number;
+  average: number;
+  attempts: number[];
+  single_record: string;
+  average_record: string;
+  single_pr: boolean;
+  average_pr: boolean;
+}
+
+export const RESULT_GROUPINGS = ["event", "competition"] as const;
+export type ResultGrouping = (typeof RESULT_GROUPINGS)[number];
+
+/** The results list is loaded on demand: null until it arrives or fails. */
+export interface ResultsState {
+  results: PersonResult[] | null;
+  error: string | null;
+}

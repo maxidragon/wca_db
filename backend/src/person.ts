@@ -525,3 +525,165 @@ export async function getPersonProfile(
     ).sort((a, b) => b.year - a.year),
   };
 }
+
+/**
+ * The order rounds run in within one event at one competition. Cutoff rounds ('d', 'e',
+ * 'g', 'c', 'h') sit beside their plain counterparts; the B final runs before the final.
+ */
+const ROUND_ORDER: Record<string, number> = {
+  "0": 0,
+  h: 0,
+  "1": 1,
+  d: 1,
+  "2": 2,
+  e: 2,
+  "3": 3,
+  g: 3,
+  b: 4,
+  c: 5,
+  f: 5,
+};
+
+export interface PersonResult {
+  competition_id: string;
+  competition_name: string;
+  start_date: string;
+  country_name: string;
+  event_id: string;
+  event_name: string;
+  /** The event's place in the official order. */
+  event_rank: number;
+  round_type_id: string;
+  /** The round's place in its event's sequence at the competition, first round lowest. */
+  round_order: number;
+  pos: number;
+  best: number;
+  average: number;
+  attempts: number[];
+  single_record: string;
+  average_record: string;
+  /** Whether the single or average beat every earlier one; the first valid one counts. */
+  single_pr: boolean;
+  average_pr: boolean;
+}
+
+interface PersonResultDetailRow extends RowDataPacket {
+  id: number;
+  competition_id: string;
+  competition_name: string;
+  start_date: string;
+  country_name: string;
+  event_id: string;
+  event_name: string;
+  event_rank: number;
+  round_type_id: string;
+  pos: number;
+  best: number;
+  average: number;
+  single_record: string | null;
+  average_record: string | null;
+}
+
+interface AttemptRow extends RowDataPacket {
+  result_id: number;
+  value: number;
+}
+
+/**
+ * Every result of the competitor, newest competition first, then by event and with the
+ * final before the rounds leading to it. Personal records are marked walking the results
+ * oldest first, so a round improving on an earlier round of the same competition is one.
+ * Returns null for an unknown WCA ID.
+ */
+export async function getPersonResults(
+  pool: Pool,
+  wcaId: string,
+): Promise<PersonResult[] | null> {
+  const [[[person]], [rows], [attempts]] = await Promise.all([
+    pool.query<RowDataPacket[]>(
+      "SELECT 1 FROM persons WHERE wca_id = ? AND sub_id = 1",
+      [wcaId],
+    ),
+    pool.query<PersonResultDetailRow[]>(
+      `SELECT r.id, r.competition_id, c.name AS competition_name,
+              DATE_FORMAT(c.start_date, '%Y-%m-%d') AS start_date,
+              co.name AS country_name, r.event_id, e.name AS event_name,
+              e.rank AS event_rank, r.round_type_id, r.pos, r.best, r.average,
+              r.regional_single_record AS single_record,
+              r.regional_average_record AS average_record
+       FROM results r
+       JOIN competitions c ON c.id = r.competition_id
+       JOIN countries co ON co.id = c.country_id
+       JOIN events e ON e.id = r.event_id
+       WHERE r.person_id = ?`,
+      [wcaId],
+    ),
+    pool.query<AttemptRow[]>(
+      `SELECT a.result_id, a.value
+       FROM results r
+       JOIN result_attempts a ON a.result_id = r.id
+       WHERE r.person_id = ?
+       ORDER BY a.result_id, a.attempt_number`,
+      [wcaId],
+    ),
+  ]);
+  if (!person) return null;
+
+  const attemptsByResult = new Map<number, number[]>();
+  for (const { result_id, value } of attempts) {
+    const values = attemptsByResult.get(result_id);
+    if (values) values.push(value);
+    else attemptsByResult.set(result_id, [value]);
+  }
+
+  // Oldest first: by date, by ID within a day as the competitions are numbered, then the
+  // rounds of each event in the order they ran.
+  const roundOrder = (row: PersonResultDetailRow) => ROUND_ORDER[row.round_type_id] ?? 0;
+  const chronological = [...rows].sort(
+    (a, b) =>
+      a.start_date.localeCompare(b.start_date) ||
+      a.competition_id.localeCompare(b.competition_id) ||
+      a.event_rank - b.event_rank ||
+      roundOrder(a) - roundOrder(b),
+  );
+
+  const bestSoFar = new Map<string, number>();
+  const isRecord = (key: string, value: number) => {
+    if (value <= 0 || value >= (bestSoFar.get(key) ?? Infinity)) return false;
+    bestSoFar.set(key, value);
+    return true;
+  };
+  const results = chronological.map(
+    (row): PersonResult => ({
+      competition_id: row.competition_id,
+      competition_name: row.competition_name,
+      start_date: row.start_date,
+      country_name: row.country_name,
+      event_id: row.event_id,
+      event_name: row.event_name,
+      event_rank: Number(row.event_rank),
+      round_type_id: row.round_type_id,
+      round_order: roundOrder(row),
+      pos: Number(row.pos),
+      best: Number(row.best),
+      average: Number(row.average),
+      attempts: attemptsByResult.get(row.id) ?? [],
+      single_record: row.single_record ?? "",
+      average_record: row.average_record ?? "",
+      single_pr: isRecord(`${row.event_id}\u0000single`, Number(row.best)),
+      average_pr: isRecord(`${row.event_id}\u0000average`, Number(row.average)),
+    }),
+  );
+
+  // Newest competition first; within it the events keep their order, final first.
+  const competitionIndex = new Map<string, number>();
+  for (const result of results)
+    if (!competitionIndex.has(result.competition_id))
+      competitionIndex.set(result.competition_id, competitionIndex.size);
+  return results.sort(
+    (a, b) =>
+      competitionIndex.get(b.competition_id)! - competitionIndex.get(a.competition_id)! ||
+      a.event_rank - b.event_rank ||
+      b.round_order - a.round_order,
+  );
+}

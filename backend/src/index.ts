@@ -8,7 +8,7 @@ import { loginWithWca, ensureAuthenticated } from "./wca_oauth";
 import { getChain, competitionsTogether, podiumsTogether, staffedTogether } from "./relations";
 import { getCompetitionAchievements, searchCompetitions } from "./achievements";
 import { bestEverRanksReady, getBestEverRanks } from "./best_ever_ranks";
-import { getPersonProfile } from "./person";
+import { getPersonProfile, getPersonResults } from "./person";
 import { getNemeses, NEMESIS_REGIONS, type NemesisRegion } from "./nemeses";
 import {
   getSchema,
@@ -292,6 +292,27 @@ app.get("/api/person", ensureAuthenticated, async (req: Request, res: Response) 
       return res.status(404).json({ error: "WCA ID not found" });
     }
     res.json(profile);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/person/results", ensureAuthenticated, async (req: Request, res: Response) => {
+  const wca_id = ((req.query.wca_id as string) || "").trim().toUpperCase();
+
+  if (!wca_id) {
+    return res.status(400).json({ error: "wca_id is required" });
+  }
+  if (!WCA_ID_RE.test(wca_id)) {
+    return res.status(400).json({ error: "Invalid WCA ID format (expected e.g. 2009ZEMD01)" });
+  }
+
+  try {
+    const results = await getPersonResults(pool, wca_id);
+    if (!results) {
+      return res.status(404).json({ error: "WCA ID not found" });
+    }
+    res.json({ results });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
