@@ -2,9 +2,10 @@
 #
 # The job runs on a self-hosted runner on the production host itself, so nothing is copied
 # over the network and no SSH key is needed: it builds in its workspace and installs the
-# result into APP_DIR. Where that is, which service runs the API and on which port, and which
-# runner to use all come from GitHub variables (the `production` environment's, and the
-# repository's runner label). The job refuses to run without them rather than guess.
+# result into APP_DIR. Where that is, and which service runs the API on which port, come from
+# the `production` environment's secrets, so this public repository's run logs show them
+# masked; the runner comes from a repository variable, because runs-on cannot read a
+# secret. The job refuses to run without any of them rather than guess.
 #
 # Layout it maintains under $APP_DIR:
 #
@@ -52,9 +53,9 @@ jobs:
     # The derived tables built after the swap take up to half an hour when missing.
     timeout-minutes: 90
     env:
-      APP_DIR: ${{ vars.APP_DIR }}
-      SERVICE: ${{ vars.SERVICE }}
-      API_PORT: ${{ vars.API_PORT }}
+      APP_DIR: ${{ secrets.APP_DIR }}
+      SERVICE: ${{ secrets.SERVICE }}
+      API_PORT: ${{ secrets.API_PORT }}
 
     steps:
       # Before anything writes. No defaults: any value written here would fit one host only.
@@ -66,7 +67,7 @@ jobs:
           failed=0
           for name in APP_DIR SERVICE API_PORT; do
             if [ -z "${!name:-}" ]; then
-              echo "::error::The $name variable is not set for the production environment."
+              echo "::error::The $name secret is not set for the production environment."
               failed=1
             fi
           done
@@ -107,7 +108,7 @@ jobs:
       - name: Write .env
         run: .github/scripts/write_backend_env.sh "$APP_DIR/.env"
         env:
-          PORT: ${{ vars.API_PORT }}
+          PORT: ${{ secrets.API_PORT }}
           FRONTEND_ORIGIN: ${{ secrets.FRONTEND_ORIGIN }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           SERVICE_TOKEN: ${{ secrets.SERVICE_TOKEN }}

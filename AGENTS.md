@@ -54,7 +54,7 @@ Every derived table is built in the staging database before the swap, so it matc
 
 ## Deploys
 
-A push to `main` deploys to production (`.github/workflows/deploy.yml`), except one that touches only `docs/` or Markdown. The workflow reads where to deploy from the `production` environment's variables (`APP_DIR`, `SERVICE`, `API_PORT`) and the runner from the `DEPLOY_RUNNER_LABEL_PRODUCTION` repository variable, and refuses to run without them. It builds, installs a new release beside the live one, switches to it, and switches back if the backend does not answer `/api/metadata` within 30 seconds.
+A push to `main` deploys to production (`.github/workflows/deploy.yml`), except one that touches only `docs/` or Markdown. The workflow reads where to deploy from the `production` environment's secrets (`APP_DIR`, `SERVICE`, `API_PORT`) and the runner from the `DEPLOY_RUNNER_LABEL_PRODUCTION` repository variable, and refuses to run without them. It builds, installs a new release beside the live one, switches to it, and switches back if the backend does not answer `/api/metadata` within 30 seconds.
 
 `backend/update_database.sh` is the import. It is run on a schedule outside this repository, and is safe to rerun: a failed run leaves the live database as it was.
 
