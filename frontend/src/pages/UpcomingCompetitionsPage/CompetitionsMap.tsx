@@ -1,7 +1,7 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { VscLock, VscUnlock } from "react-icons/vsc";
-import { Circle, CircleMarker, MapContainer, Popup, TileLayer, useMap, useMapEvents } from "react-leaflet";
-import { latLngBounds } from "leaflet";
+import { Circle, CircleMarker, MapContainer, Marker, Popup, TileLayer, useMap, useMapEvents } from "react-leaflet";
+import { divIcon, latLngBounds, type DivIcon } from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { formatDateRange } from "../../utils/results";
 import {
@@ -16,6 +16,68 @@ import {
 } from "./types";
 
 type Located = UpcomingCompetition & { latitude: number; longitude: number };
+
+// The pin in a 24 x 32 box: a round head centred on (12, 12) and the tip at (12, 31.5).
+const PIN_PATH = "M12 31.5C12 31.5 1 20 1 12a11 11 0 0 1 22 0c0 8-11 19.5-11 19.5z";
+const PIN_TIP = { x: 12, y: 31.5 };
+const CHAMPIONSHIP_STROKE = "#111827";
+
+type PinStyle = { color: string; championship: boolean; registered: boolean };
+
+// Pixels per unit of the pin's box: a championship pin is drawn larger.
+const pinScale = (championship: boolean) => (championship ? 1 : 0.8);
+
+// The pin as SVG markup, shared by the map icons and the legend. A registered competition gets a
+// blue halo around the whole pin, so the box grows by the halo's width on every side.
+function pinSvg({ color, championship, registered }: PinStyle, scale = pinScale(championship)): string {
+  const pad = registered ? 3.5 : 1.5;
+  const width = (24 + 2 * pad) * scale;
+  const height = (32 + 2 * pad) * scale;
+  const stroke = championship ? CHAMPIONSHIP_STROKE : "#ffffff";
+  const strokeWidth = championship ? 2.5 : 1.5;
+  const halo = registered
+    ? `<path d="${PIN_PATH}" fill="none" stroke="${REGISTERED_COLOR}" stroke-width="7" stroke-linejoin="round"/>`
+    : "";
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" ` +
+    `viewBox="${-pad} ${-pad} ${24 + 2 * pad} ${32 + 2 * pad}" style="display:block;overflow:visible">` +
+    halo +
+    `<path d="${PIN_PATH}" fill="${color}" stroke="${stroke}" stroke-width="${strokeWidth}" stroke-linejoin="round"/>` +
+    `<circle cx="12" cy="12" r="4" fill="#ffffff"/>` +
+    `</svg>`
+  );
+}
+
+const pinIcons = new Map<string, DivIcon>();
+
+// One icon per look, reused by every competition that shares it.
+function pinIcon(style: PinStyle): DivIcon {
+  const key = `${style.color}|${style.championship}|${style.registered}`;
+  let icon = pinIcons.get(key);
+  if (!icon) {
+    const scale = pinScale(style.championship);
+    const pad = style.registered ? 3.5 : 1.5;
+    const width = (24 + 2 * pad) * scale;
+    const height = (32 + 2 * pad) * scale;
+    const tip: [number, number] = [(PIN_TIP.x + pad) * scale, (PIN_TIP.y + pad) * scale];
+    icon = divIcon({
+      html: pinSvg(style, scale),
+      // Without a class name Leaflet draws its default white box behind the icon.
+      className: "competition-pin",
+      iconSize: [width, height],
+      iconAnchor: tip,
+      // The popup opens just above the pin's head.
+      popupAnchor: [0, -tip[1] + 2],
+    });
+    pinIcons.set(key, icon);
+  }
+  return icon;
+}
+
+function LegendPin(style: PinStyle) {
+  // Static markup built from constants, never from user input.
+  return <span aria-hidden className="inline-block" dangerouslySetInnerHTML={{ __html: pinSvg(style, 0.5) }} />;
+}
 
 const LOCK_STORAGE_KEY = "upcomingCompetitionsPointLocked";
 
@@ -137,71 +199,61 @@ export default function CompetitionsMap({
           )}
           {located.map((competition) => {
             const status = statusInfo(competition.registration_status);
-            const radius = competition.championships.length > 0 ? 9 : 7;
+            const championship = competition.championships.length > 0;
             return (
-              <Fragment key={competition.id}>
-                {competition.my_registration && (
-                  // A ring around the marker; it does not take clicks, so the popup still opens.
-                  <CircleMarker
-                    center={[competition.latitude, competition.longitude]}
-                    radius={radius + 4}
-                    interactive={false}
-                    pathOptions={{ color: REGISTERED_COLOR, weight: 3, fill: false }}
-                  />
-                )}
-                <CircleMarker
-                  center={[competition.latitude, competition.longitude]}
-                  radius={radius}
-                  bubblingMouseEvents={false}
-                  pathOptions={{
-                    color: competition.championships.length > 0 ? "#111827" : "#ffffff",
-                    weight: competition.championships.length > 0 ? 2.5 : 1.5,
-                    fillColor: status.color,
-                    fillOpacity: 0.9,
-                  }}
-                >
-                  <Popup>
-                    <div className="space-y-1 text-sm">
-                      <a
-                        href={`${WCA_ORIGIN}/competitions/${competition.id}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="font-semibold"
-                      >
-                        {competition.name}
-                      </a>
-                      <div className="text-gray-600">
-                        {formatDateRange(competition.start_date, competition.end_date)} ·{" "}
-                        {competition.city}, {competition.country_name}
-                      </div>
-                      {competition.championships.length > 0 && (
-                        <div className="text-gray-600">
-                          Championship: {competition.championships.map((c) => c.name).join(", ")}
-                        </div>
-                      )}
-                      <div className="text-gray-600">
-                        Competitors: {competitorsLabel(competition)}
-                      </div>
-                      {competition.my_registration && (
-                        <div className="font-medium text-blue-700">
-                          {MY_REGISTRATION_LABELS[competition.my_registration]}
-                        </div>
-                      )}
-                      {competition.distance_km !== null && (
-                        <div className="text-gray-600">
-                          Distance: {competition.distance_km.toLocaleString()} km
-                        </div>
-                      )}
-                      <div>
-                        <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${status.badge}`}>
-                          {status.label}
-                        </span>{" "}
-                        <span className="text-xs text-gray-500">{registrationDetail(competition)}</span>
-                      </div>
+              <Marker
+                key={competition.id}
+                position={[competition.latitude, competition.longitude]}
+                icon={pinIcon({
+                  color: status.color,
+                  championship,
+                  registered: competition.my_registration !== null,
+                })}
+                // Championships and the viewer's own competitions stay on top of their neighbours.
+                zIndexOffset={(championship ? 1000 : 0) + (competition.my_registration ? 2000 : 0)}
+                bubblingMouseEvents={false}
+              >
+                <Popup>
+                  <div className="space-y-1 text-sm">
+                    <a
+                      href={`${WCA_ORIGIN}/competitions/${competition.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-semibold"
+                    >
+                      {competition.name}
+                    </a>
+                    <div className="text-gray-600">
+                      {formatDateRange(competition.start_date, competition.end_date)} ·{" "}
+                      {competition.city}, {competition.country_name}
                     </div>
-                  </Popup>
-                </CircleMarker>
-              </Fragment>
+                    {competition.championships.length > 0 && (
+                      <div className="text-gray-600">
+                        Championship: {competition.championships.map((c) => c.name).join(", ")}
+                      </div>
+                    )}
+                    <div className="text-gray-600">
+                      Competitors: {competitorsLabel(competition)}
+                    </div>
+                    {competition.my_registration && (
+                      <div className="font-medium text-blue-700">
+                        {MY_REGISTRATION_LABELS[competition.my_registration]}
+                      </div>
+                    )}
+                    {competition.distance_km !== null && (
+                      <div className="text-gray-600">
+                        Distance: {competition.distance_km.toLocaleString()} km
+                      </div>
+                    )}
+                    <div>
+                      <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${status.badge}`}>
+                        {status.label}
+                      </span>{" "}
+                      <span className="text-xs text-gray-500">{registrationDetail(competition)}</span>
+                    </div>
+                  </div>
+                </Popup>
+              </Marker>
             );
           })}
         </MapContainer>
@@ -209,16 +261,16 @@ export default function CompetitionsMap({
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-600">
         {REGISTRATION_STATUSES.map((status) => (
           <span key={status.id} className="flex items-center gap-1.5">
-            <span className="inline-block h-3 w-3 rounded-full border border-white" style={{ background: status.color }} />
+            <LegendPin color={status.color} championship={false} registered={false} />
             {status.label}
           </span>
         ))}
         <span className="flex items-center gap-1.5">
-          <span className="inline-block h-3 w-3 rounded-full border-2 border-gray-900 bg-white" />
+          <LegendPin color="#ffffff" championship registered={false} />
           Championship
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="inline-block h-3.5 w-3.5 rounded-full border-[3px] bg-white" style={{ borderColor: REGISTERED_COLOR }} />
+          <LegendPin color="#ffffff" championship={false} registered />
           Registered
         </span>
         <span className="text-gray-500">
