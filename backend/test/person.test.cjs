@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const mysql = require("mysql2/promise");
 const { readFileSync } = require("node:fs");
 const path = require("node:path");
-const { getPersonProfile } = require("../dist/person");
+const { getPersonProfile, getPersonResults } = require("../dist/person");
 
 // The entry table is built from the statements that ship, so the profile is read from the
 // same table an import produces rather than from a restatement of it.
@@ -413,6 +413,74 @@ integration(
   },
 );
 
+integration("an unknown WCA ID has no results", async () => {
+  assert.equal(await getPersonResults(pool, "2025ZZZZ99"), null);
+});
+
+integration(
+  "results run newest competition first, by event, the final before earlier rounds",
+  async () => {
+    const results = await getPersonResults(pool, "2025AAAA01");
+    assert.deepEqual(
+      results.map(({ competition_id, event_id, round_type_id }) =>
+        [competition_id, event_id, round_type_id].join(" "),
+      ),
+      [
+        "Beijing2026 333 f",
+        "Krakow2026 333 f",
+        "Warsaw2026 333 f",
+        "Warsaw2026 333 1",
+        "Warsaw2025 333 f",
+        "Warsaw2025 333bf f",
+      ],
+    );
+    const [, , warsawFinal] = results;
+    assert.deepEqual(warsawFinal, {
+      competition_id: "Warsaw2026",
+      competition_name: "Warsaw Open 2026",
+      start_date: "2026-02-10",
+      country_name: "Poland",
+      event_id: "333",
+      event_name: "3x3x3 Cube",
+      event_rank: 20,
+      round_type_id: "f",
+      round_order: 5,
+      pos: 2,
+      best: 500,
+      average: 700,
+      attempts: [500, 600, 700, 800, -1],
+      single_record: "ER",
+      average_record: "",
+      single_pr: false,
+      average_pr: false,
+    });
+  },
+);
+
+integration(
+  "a result is a personal record when it beats every earlier one, rounds included",
+  async () => {
+    const results = await getPersonResults(pool, "2025EEEE01");
+    assert.deepEqual(
+      results.map(({ competition_id, round_type_id, single_pr, average_pr }) => ({
+        round: `${competition_id} ${round_type_id}`,
+        single_pr,
+        average_pr,
+      })),
+      [
+        { round: "Lodz2026 f", single_pr: true, average_pr: true },
+        // Nothing solved is never a record.
+        { round: "Poznan2026 f", single_pr: false, average_pr: false },
+        // An average equal to the best so far does not beat it.
+        { round: "Gdansk2026 f", single_pr: true, average_pr: false },
+        { round: "Gdansk2025 f", single_pr: true, average_pr: true },
+        // The first valid results are records of their own.
+        { round: "Gdansk2025 1", single_pr: true, average_pr: true },
+      ],
+    );
+  },
+);
+
 integration("a competitor without results has an empty profile", async () => {
   await pool.query(
     "INSERT INTO persons VALUES ('2026EEEE01',1,'Eve','Poland')",
@@ -425,4 +493,5 @@ integration("a competitor without results has an empty profile", async () => {
   assert.equal(profile.totals.competitions, 0);
   assert.equal(profile.totals.solves, 0);
   assert.equal(profile.totals.first_competition_date, null);
+  assert.deepEqual(await getPersonResults(pool, "2026EEEE01"), []);
 });

@@ -69,7 +69,8 @@ const PersonPage = () => {
       <h2 className="mb-1 text-2xl font-bold">Person</h2>
       <p className="mb-6 text-sm text-gray-500">
         Everything one competitor's results say about them: personal bests, every
-        competition, who they have competed with most, and where they have competed.
+        result by event or by competition, who they have competed with most, and where
+        they have competed.
       </p>
 
       <form onSubmit={handleSubmit} className="mb-8 flex flex-col gap-3 sm:flex-row">
