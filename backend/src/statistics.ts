@@ -31,9 +31,17 @@ function temporaryTableBytes() {
 // 64MB on every statistic; on a small host the larger buffer only invites swapping.
 const SORT_BUFFER = 2 * MEGABYTE;
 const JOIN_BUFFER = 4 * MEGABYTE;
+// Split materialization ("LATERAL DERIVED") recomputes a grouped derived table once per row
+// of the table it is joined to, restricted to that row's key. These derived tables group the
+// whole export and are then joined to every competitor or competition for their names, so the
+// split runs one aggregation per competitor. MariaDB 10.5 picks that plan for most
+// competitions, which then runs past five minutes although the grouping alone takes about
+// eight seconds. Later versions happen not to choose it, but nothing here wants it, so it is
+// off for every statistic.
+const OPTIMIZER_SWITCH = "split_materialized=off";
 function statisticsStatement(sql: string) {
   const temporaryTable = temporaryTableBytes();
-  return `SET STATEMENT max_statement_time=${statementTimeout()}, tmp_table_size=${temporaryTable}, max_heap_table_size=${temporaryTable}, sort_buffer_size=${SORT_BUFFER}, join_buffer_size=${JOIN_BUFFER} FOR ${sql}`;
+  return `SET STATEMENT max_statement_time=${statementTimeout()}, tmp_table_size=${temporaryTable}, max_heap_table_size=${temporaryTable}, sort_buffer_size=${SORT_BUFFER}, join_buffer_size=${JOIN_BUFFER}, optimizer_switch='${OPTIMIZER_SWITCH}' FOR ${sql}`;
 }
 export interface StatisticsOptions {
   statistics: typeof STATISTICS;
