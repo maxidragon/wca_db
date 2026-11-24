@@ -919,3 +919,14 @@ integration(
     }
   },
 );
+
+test("statistics run with split materialization off, so MariaDB 10.5 groups the export once", async () => {
+  const { pool, state } = fakeStatisticsPool();
+  const service = createStatisticsService(pool);
+  await service.get({ statistic: "most-competitions" });
+  const computation = state.statements.find((s) => s.sql.includes("RANK() OVER"));
+  assert.match(
+    computation.sql,
+    /^SET STATEMENT [^]*optimizer_switch='split_materialized=off' FOR /,
+  );
+});
