@@ -59,6 +59,13 @@ function isoDate(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
+// A competition whose results are not published yet: it has not ended, or it has ended
+// but its results have not been posted. Registrations stand in for its results.
+function awaitingResultsCondition(alias: string, today: string): string {
+  return `(${alias}.end_date >= '${today}'
+    OR NOT EXISTS (SELECT 1 FROM results posted WHERE posted.competition_id = ${alias}.id))`;
+}
+
 function acceptedRegistrationAttendance(today: string, audience: string): string {
   return `
     SELECT u.wca_id AS person_id, reg.competition_id
@@ -70,7 +77,7 @@ function acceptedRegistrationAttendance(today: string, audience: string): string
       AND reg.is_competing = 1
       AND reg.deleted_at IS NULL
       AND u.wca_id IS NOT NULL
-      AND future_comp.end_date >= '${today}'
+      AND ${awaitingResultsCondition("future_comp", today)}
       AND future_comp.cancelled_at IS NULL
   `;
 }
@@ -154,7 +161,12 @@ export async function getCompetitionAchievements(
   const today = isoDate(now);
   const startDate = competition.start_date;
   const endDate = competition.end_date;
-  const projected = endDate >= today;
+  const [[postedRow]] = await pool.query<RowDataPacket[]>(
+    "SELECT EXISTS (SELECT 1 FROM results WHERE competition_id = ?) AS posted",
+    [competition.id]
+  );
+  // A competition that has ended but has no results yet is projected from its registrations.
+  const projected = endDate >= today || !Number(postedRow.posted);
   const sequenceParams = [startDate, startDate, competition.id];
   const roster = rosterSql(projected);
 
@@ -289,11 +301,12 @@ export async function getCompetitionAchievements(
            AND reg.competing_status = 'accepted'
            AND reg.is_competing = 1
            AND reg.deleted_at IS NULL
-           AND future_comp.end_date >= ?
+           AND future_comp.cancelled_at IS NULL
+           AND ${awaitingResultsCondition("future_comp", today)}
            AND ${beforeOrAtCondition("future_comp")}
          GROUP BY u.wca_id, reg.competition_id, future_comp.start_date
          ORDER BY future_comp.start_date, reg.competition_id`,
-        [...rosterIds, today, ...sequenceParams]
+        [...rosterIds, ...sequenceParams]
       );
 
       const slotsById = new Map<string, AttemptSlotRow[]>();
@@ -393,7 +406,7 @@ export async function getCompetitionAchievements(
     successful_attempt_milestones: successfulAttemptMilestones,
     together_milestones: togetherMilestones,
     methodology: projected
-      ? "Competition projections include all accepted, non-cancelled registrations for each competitor up to this competition, deduplicated by competition ID. Attempt projections use first-round attempt slots adjusted by each competitor's historical successful-attempt rate."
+      ? "This competition has no published results yet, so it is projected from registrations. Competition projections include all accepted, non-cancelled registrations, for competitions without published results, for each competitor up to this competition, deduplicated by competition ID. Attempt projections use first-round attempt slots adjusted by each competitor's historical successful-attempt rate."
       : "Completed achievements use published results and delegate assignments.",
   };
 }
