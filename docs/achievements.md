@@ -11,9 +11,9 @@ The competition is kept in the URL as `competition_id`, so a page can be linked.
 
 ## Finished and upcoming competitions
 
-For a competition that has ended, everything comes from published results and Delegate assignments. Competitions are ordered by start date, and by ID within a day, so two competitions on the same day count in a fixed order. Cancelled competitions are never counted.
+For a competition that has ended and has published results, everything comes from published results and Delegate assignments. Competitions are ordered by start date, and by ID within a day, so two competitions on the same day count in a fixed order. Cancelled competitions are never counted.
 
-For a competition that has not ended yet (including one in progress), the page projects: "Likely to attend" and "Likely to delegate". The roster is its accepted, competing registrations from people with a WCA ID; newcomers have no history to reach a milestone with, so they are left out of it, but the page header counts every accepted registration. A competitor's count adds every other accepted registration for a competition that has not ended and starts before this one. Successful attempts are estimated: each registered event contributes its first round's number of attempts, times the competitor's historical share of successful attempts, so these milestones are marked as estimates.
+For a competition that has not ended yet (including one in progress), or has ended but has no results published yet, the page projects: "Likely to attend" and "Likely to delegate". The roster is its accepted, competing registrations from people with a WCA ID; newcomers have no history to reach a milestone with, so they are left out of it, but the page header counts every accepted registration. A competitor's count adds every other accepted registration for a competition that starts before this one and has no published results yet (it has not ended, or its results are still awaited). Successful attempts are estimated: each registered event contributes its first round's number of attempts, times the competitor's historical share of successful attempts, so these milestones are marked as estimates.
 
 ## API
 
